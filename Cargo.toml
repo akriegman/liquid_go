@@ -1,0 +1,43 @@
+[package]
+name = "liquid_go"
+version = "0.1.0"
+authors = ["Aaron Kriegman <aaronkplus2@gmail.com>"]
+categories = ["wasm"]
+readme = "README.md"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.dev]
+lto = true
+opt-level = 3
+
+[profile.release]
+lto = true
+
+[features]
+# default = ["wee_alloc"]
+# default = ["show_liberties"]
+show_liberties = []
+
+[dependencies]
+union-find = "0.3.3"
+binary-heap-plus = "0.4.1"
+wasm-bindgen = "0.2.78"
+compare = "0.1.0"
+wee_alloc = { version = "0.4.5", optional = true }
+
+# This should be a debug only dependency, but cargo does not support this feature >:(
+console_error_panic_hook = "0.1.7"
+
+# [dependencies.web-sys]
+# version = "0.3.55"
+# features = []
+
+# NOTE: Correct the version numbers before uncommenting.
+# [dev-dependencies]
+# wasm-bindgen-test = "0.2.45"
+# futures = "0.1.27"
+# js-sys = "0.3.22"
+# wasm-bindgen-futures = "0.3.22"

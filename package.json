@@ -1,0 +1,21 @@
+{
+  "author": "Aaron Kriegman <aaronkplus2@gmail.com>",
+  "name": "liquid_go",
+  "version": "0.1.0",
+  "prettier": {
+    "arrowParens": "avoid"
+  },
+  "scripts": {
+    "build": "rimraf dist pkg && webpack",
+    "start": "rimraf dist pkg && webpack-dev-server",
+    "dist": "npm run build && scp dist/* ak2313@shell.srcf.net:~/public_html/liquid_go"
+  },
+  "devDependencies": {
+    "@wasm-tool/wasm-pack-plugin": "1.6.0",
+    "copy-webpack-plugin": "10.1.0",
+    "webpack": "5.65.0",
+    "webpack-cli": "4.9.1",
+    "webpack-dev-server": "4.6.0",
+    "rimraf": "3.0.2"
+  }
+}

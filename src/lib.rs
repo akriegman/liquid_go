@@ -1,9 +1,10 @@
-use binary_heap_plus::BinaryHeap;
-use compare::Compare;
+use rstar::RTree;
 use union_find::{QuickFindUf as UF, Union, UnionFind, UnionResult};
 use wasm_bindgen::prelude::*;
 
 use Team::*;
+
+const VROOM: f32 = 0.05;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -31,6 +32,8 @@ pub fn main() {
 
 #[wasm_bindgen]
 pub struct Board {
+  w_pos: Option<[f32; 2]>,
+  b_pos: Option<[f32; 2]>,
   /// Side length.
   size: usize,
   // The board data is split into two separate
@@ -50,12 +53,12 @@ pub struct Board {
 }
 
 struct Body {
-  liberties: BinaryHeap<Point, DistComparator>,
+  libs: RTree<Point>,
 }
 
 /// These numbers are meant to be converted to little endian RGBA colors.
 #[repr(u32)]
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum Team {
   Black = 0x_ff_20_00_00,
   White = 0x_ff_e0_ff_ff,
@@ -63,16 +66,18 @@ enum Team {
 }
 
 #[wasm_bindgen]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
-  pub x: usize,
-  pub y: usize,
+  pub x: isize,
+  pub y: isize,
 }
 
 #[wasm_bindgen]
 impl Board {
   pub fn new(size: usize) -> Self {
     Self {
+      b_pos: None,
+      w_pos: None,
       size,
       teams: vec![Empty; size * size],
       owner: vec![0; size * size],
@@ -89,8 +94,8 @@ impl Board {
   #[cfg(not(feature = "show_liberties"))]
   pub fn get_image_slice(&self) -> Point {
     Point {
-      x: self.teams.as_ptr() as usize,
-      y: self.teams.len() * 4, // sizeof u32 / sizeof u8 = 4
+      x: self.teams.as_ptr() as isize,
+      y: self.teams.len() as isize * 4, // sizeof u32 / sizeof u8 = 4
     }
   }
   /// This version does dome more expensive copying just so that it can color in the boundaries.
@@ -104,7 +109,7 @@ impl Board {
         | (key as u32 * 32 & 0xff) << 8
         | key as u32 * 16 & 0xff;
       // Clone to appease the borrow checker.
-      for lib in self.bodies.get(key).liberties.clone().iter() {
+      for lib in self.bodies.get(key).libs.clone().iter() {
         let idx = self.get_idx(*lib);
         // debug_assert!(self.teams[idx] != Black);
         self.debug_image[idx] = unsafe { std::mem::transmute::<_, _>(color) };
@@ -118,7 +123,7 @@ impl Board {
 
   #[inline]
   fn get_idx(&self, p: Point) -> usize {
-    p.x + p.y * self.size
+    p.x as usize + p.y as usize * self.size
   }
 
   #[inline]
@@ -173,6 +178,12 @@ impl Board {
     let mut w_pos: Option<Point> = if w_active { Some(*w_pos) } else { None };
     let mut b_key: Option<usize> = None;
     let mut w_key: Option<usize> = None;
+    if self.b_pos == None || b_pos == None {
+      self.b_pos = b_pos.map(Point::as_f32);
+    };
+    if self.w_pos == None || w_pos == None {
+      self.w_pos = w_pos.map(Point::as_f32);
+    };
 
     // Sumarry of the ugly spaghetti logic:
     // If mouse is not down or we are over enemy territory, p_pos = None and p_key = 0.
@@ -186,44 +197,53 @@ impl Board {
         match (self.get_teams(pos), team) {
           (Black, White) | (White, Black) => *pos_ref = None,
           (Black, Black) | (White, White) => {
-            let key = self.get_owner(pos);
-            self.bodies.get_mut(key).liberties.replace_cmp(DistComparator::new(pos));
-            *key_ref = Some(key);
+            *key_ref = Some(self.get_owner(pos));
           }
           (Empty, _) => {
-            *key_ref = Some(self.bodies.insert(Body {
-              liberties: BinaryHeap::from_vec_cmp(vec![pos], DistComparator::new(pos)),
-            }))
+            *key_ref = Some(self.bodies.insert(Body { libs: RTree::bulk_load(vec![pos]) }))
           }
           (_, Empty) => unreachable!(),
         }
       }
     }
 
-    let (f_key, f_team, s_key, s_team) =
-      if black_first { (b_key, Black, w_key, White) } else { (w_key, White, b_key, Black) };
+    // What I'm really trying to do here is irreducible control flow.
+    let (ref f_pos, f_key, f_team, ref s_pos, s_key, s_team) = if black_first {
+      (self.b_pos, b_key, Black, self.w_pos, w_key, White)
+    } else {
+      (self.w_pos, w_key, White, self.b_pos, b_key, Black)
+    };
 
     for _ in (0..count).step_by(2) {
+      if let (Some(ref mut self_pos), Some(pos)) = (self.b_pos, b_pos) {
+        self_pos[0] += (pos.x as f32 - self_pos[0]) * VROOM;
+        self_pos[1] += (pos.y as f32 - self_pos[1]) * VROOM;
+      }
+      if let (Some(ref mut self_pos), Some(pos)) = (self.w_pos, w_pos) {
+        self_pos[0] += (pos.x as f32 - self_pos[0]) * VROOM;
+        self_pos[1] += (pos.y as f32 - self_pos[1]) * VROOM;
+      }
       // I could technically remove these if statements because the if statement in assimilate
       // will fail for the 0th Body. TODO check if this makes a difference.
-      if let Some(key) = f_key {
-        self.assimilate(key, f_team);
+      if let (Some(pos), Some(key)) = (f_pos, f_key) {
+        self.assimilate(*pos, key, f_team);
       }
-      if let Some(key) = s_key {
-        self.assimilate(key, s_team);
-        self.assimilate(key, s_team);
+      if let (Some(pos), Some(key)) = (s_pos, s_key) {
+        self.assimilate(*pos, key, s_team);
+        self.assimilate(*pos, key, s_team);
       }
-      if let Some(key) = f_key {
-        self.assimilate(key, f_team);
+      if let (Some(pos), Some(key)) = (f_pos, f_key) {
+        self.assimilate(*pos, key, f_team);
       }
     }
   }
 
   /// Tell bodies[bod_key] to absorb it's nearest liberty.
-  fn assimilate(&mut self, bod_key: usize, us: Team) {
+  fn assimilate(&mut self, spigot: [f32; 2], bod_key: usize, us: Team) {
+    let spigot = Point::from_f32(spigot);
     // TODO: some of these `bodies.get` calls should be merged, since
     // `get` is not a simple read on a UnionFind.
-    if let Some(pos) = self.bodies.get_mut(bod_key).liberties.pop() {
+    if let Some(pos) = self.bodies.get_mut(bod_key).libs.pop_nearest_neighbor(&spigot) {
       // TODO: once we properly prune opponent liberties this check will no
       // longer be necessary. Update: that might not be true, idk.
       if self.get_teams(pos) != Empty {
@@ -232,32 +252,34 @@ impl Board {
 
       *self.get_teams_mut(pos) = us;
       *self.get_owner_mut(pos) = bod_key;
+      dbg!(self.get_teams(pos));
 
       for lib in [
         if pos.x > 0 { Some(Point { x: pos.x - 1, ..pos }) } else { None },
         if pos.y > 0 { Some(Point { y: pos.y - 1, ..pos }) } else { None },
-        if pos.x < self.size - 1 { Some(Point { x: pos.x + 1, ..pos }) } else { None },
-        if pos.y < self.size - 1 { Some(Point { y: pos.y + 1, ..pos }) } else { None },
-      ] {
-        if let Some(lib) = lib {
-          match (us, self.get_teams(lib)) {
-            (Black, White) | (White, Black) => {
-              // TODO: see below.
-            }
-            (Black, Black) | (White, White) => {
-              if self.bodies.union(bod_key, self.get_owner(lib)) {
-                // ^^^ This function call short circuits if they're already the same body.
-
-                // TODO: we should remove a liberty from `owner[lib]` here. Doing this efficiently will
-                // require switching from a BinaryHeap to a BTree (I think).
-              }
-            }
-
-            (_, Empty) => {
-              self.bodies.get_mut(bod_key).liberties.push(lib);
-            }
-            (Empty, _) => panic!("You cannot assimilate back into the board (yet)."),
+        if pos.x < self.size as isize - 1 { Some(Point { x: pos.x + 1, ..pos }) } else { None },
+        if pos.y < self.size as isize - 1 { Some(Point { y: pos.y + 1, ..pos }) } else { None },
+      ]
+      .into_iter()
+      .flatten()
+      {
+        match (us, self.get_teams(lib)) {
+          (Black, White) | (White, Black) => {
+            // TODO: see below.
           }
+          (Black, Black) | (White, White) => {
+            if self.bodies.union(bod_key, self.get_owner(lib)) {
+              // ^^^ This function call short circuits if they're already the same body.
+
+              // TODO: we should remove a liberty from `owner[lib]` here. Doing this efficiently will
+              // require switching from a BinaryHeap to a BTree (I think).
+            }
+          }
+
+          (_, Empty) => {
+            self.bodies.get_mut(bod_key).libs.insert(lib);
+          }
+          (Empty, _) => panic!("You cannot assimilate back into the board (yet)."),
         }
       }
     } else {
@@ -271,65 +293,64 @@ impl Board {
 impl Union for Body {
   /// Always returns Left. This way the caller can and must
   /// ensure that the currently active body is the parent.
-  /// This way when merging the liberties the correct heap
-  /// closure will be used.
-  fn union(mut lval: Self, mut rval: Self) -> UnionResult<Self> {
-    lval.liberties.append(&mut rval.liberties);
+  fn union(mut lval: Self, rval: Self) -> UnionResult<Self> {
+    // This rebuilds the tree with RTree::bulk_load(), which requires allocating the elements
+    // into a Vec first. I wonder if there's a more efficient way to do this? It's probably good
+    // to rebuild the tree every now and then anyways to maintain quality? idk.
+    lval.libs = RTree::bulk_load(lval.libs.iter().chain(rval.libs.iter()).copied().collect());
     UnionResult::Left(lval)
   }
 }
 
 impl Default for Body {
   fn default() -> Self {
-    Body { liberties: BinaryHeap::from_vec_cmp(vec![], DistComparator::new(Point { x: 0, y: 0 })) }
+    Body { libs: RTree::new() }
   }
 }
 
 #[wasm_bindgen]
 impl Point {
   /// For crossing the js-wasm barrier.
-  pub fn new(x: usize, y: usize) -> Self {
+  pub fn new(x: isize, y: isize) -> Self {
     Point { x, y }
   }
 
   /// For crossing the js-wasm barrier.
-  pub fn set(&mut self, x: usize, y: usize) {
+  pub fn set(&mut self, x: isize, y: isize) {
     self.x = x;
     self.y = y;
   }
-}
-
-/// Comparator for the nearest point to a particular point `self.from`.
-/// Points here are one dimensional indices into the Board array,
-/// treated as two dimensional through division and modulo.
-/// Perhaps we should store our points as some sort of point struct,
-/// making this comparison faster but making indexing into Board slower.
-/// This comparison will be run a lot so that would probably be better.
-/// Note that the ordering is reversed so the closer point is greater.
-/// I've also included wide as a member here, but it should be the same
-/// across all instances in a particular Board, meaning there is unecessary
-/// data duplication. Making it a global variable would save space but
-/// might have an effect on speed? Making it a compile time constant may be best,
-/// but removes flexibility.
-#[derive(Clone, Copy)]
-struct DistComparator {
-  from: Point,
-}
-
-impl DistComparator {
-  fn new(from: Point) -> Self {
-    DistComparator { from }
+  fn as_f32(self) -> [f32; 2] {
+    [self.x as f32, self.y as f32]
+  }
+  fn from_f32(arr: [f32; 2]) -> Point {
+    Point { x: arr[0] as isize, y: arr[1] as isize }
   }
 }
 
-impl Compare<Point> for DistComparator {
-  fn compare(&self, a: &Point, b: &Point) -> std::cmp::Ordering {
-    let dxa = a.x as isize - self.from.x as isize;
-    let dxb = b.x as isize - self.from.x as isize;
-    let dya = a.y as isize - self.from.y as isize;
-    let dyb = b.y as isize - self.from.y as isize;
-    // The cmp is reversed so that the closer point is greater.
-    (dxb * dxb + dyb * dyb).cmp(&(dxa * dxa + dya * dya))
+/// Copy pasted from the rstar docs.
+impl rstar::Point for Point {
+  type Scalar = isize;
+  const DIMENSIONS: usize = 2;
+
+  fn generate(mut generator: impl FnMut(usize) -> Self::Scalar) -> Self {
+    Self { x: generator(0), y: generator(1) }
+  }
+
+  fn nth(&self, index: usize) -> Self::Scalar {
+    match index {
+      0 => self.x,
+      1 => self.y,
+      _ => unreachable!(),
+    }
+  }
+
+  fn nth_mut(&mut self, index: usize) -> &mut Self::Scalar {
+    match index {
+      0 => &mut self.x,
+      1 => &mut self.y,
+      _ => unreachable!(),
+    }
   }
 }
 

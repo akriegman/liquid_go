@@ -8,9 +8,7 @@ const UNITS = 600; // Units per side
 const CELLS = UNITS * CPU; // Cells per side
 const PIXEL = UNITS * PPU; // Pixel per side
 
-let mousePos = wasm.Point.new(CELLS / 2, CELLS / 2);
-let mouseLast = { x: CELLS / 2, y: CELLS / 2 };
-let mouseNext = { x: CELLS / 2, y: CELLS / 2 };
+let mouse = wasm.Point.new(CELLS / 2, CELLS / 2);
 let mouseL = false;
 let mouseR = false;
 
@@ -43,7 +41,6 @@ canvas.addEventListener("mousedown", event => {
       break;
   }
   updatePosition(event);
-  mouseLast = mouseNext;
 });
 canvas.addEventListener("mouseup", event => {
   switch (event.button) {
@@ -56,56 +53,44 @@ canvas.addEventListener("mouseup", event => {
   }
   updatePosition(event);
 });
+let blackFirst = true;
+let frames = 0;
+let then = performance.now();
 
-const { x: ptr, y: len } = board.get_image_slice();
-const tmp = new ImageData(
-  new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
-  CELLS,
-  CELLS
-);
-createImageBitmap(tmp)
-  .then(bitmap => {
-    let blackFirst = true;
-    let frames = 0;
-    let then = performance.now();
+loop();
 
-    function loop(now) {
-      frames += 1;
-      for (let lam = 0; lam < 1; lam += 0.02) {
-        mousePos.set(
-          (1 - lam) * mouseLast.x + lam * mouseNext.x,
-          (1 - lam) * mouseLast.y + lam * mouseNext.y
-        );
-        board.spill(mousePos, mouseL, mousePos, mouseR, 8, blackFirst);
-      }
-      blackFirst = !blackFirst;
-      mouseLast = mouseNext;
-      ctx.drawImage(bitmap, 0, 0, PIXEL, PIXEL);
-      if (frames % 60 == 0) {
-        console.log((60 * 1000) / (now - then));
-        then = now;
-      }
-      requestAnimationFrame(loop);
-    }
-
-    loop();
-  })
-  .catch(console.error);
-
-// wasm_bindgen requires manual garbage collection right now.
-// This function will never be called as is, which is okay since
-// we'll be using these until the page is closed, but just a reminder
-// for now. And if we can figure out how to use wasm-bindgen --weak-ref
-// with wasm-pack, this can hopefully be eliminated.
-// board.free();
-// mousePos.free();
-
-function updatePosition(event) {
-  mouseNext = {
-    x: (event.offsetX * CPU) / PPU,
-    y: (event.offsetY * CPU) / PPU,
-  };
-}
+// If this program ever exits, remember to call board.free() and mouse.free().
 
 // I'm doing some manual bindings here. This takes care of my vector
 // transmutation problem and my finicky Rust APIs problem at the same time.
+function draw() {
+  const { x: ptr, y: len } = board.get_image_slice();
+  const tmp = new ImageData(
+    new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
+    CELLS,
+    CELLS
+  );
+  createImageBitmap(tmp)
+    .then(bitmap => {
+      ctx.drawImage(bitmap, 0, 0, PIXEL, PIXEL);
+    })
+    .catch(console.error);
+}
+
+function loop(now) {
+  board.spill(mouse, mouseL, mouse, mouseR, 100, blackFirst);
+  draw();
+
+  frames += 1;
+  blackFirst = !blackFirst;
+  if (now - then > 5000) {
+    console.log(frames / (now - then) * 1000);
+    then = now;
+    frames = 0;
+  }
+  requestAnimationFrame(loop);
+}
+
+function updatePosition(event) {
+  mouse.set(event.offsetX * CPU / PPU, event.offsetY * CPU / PPU);
+}

@@ -2,9 +2,6 @@
   "author": "Aaron Kriegman <aaronkplus2@gmail.com>",
   "name": "liquid_go",
   "version": "0.1.0",
-  "prettier": {
-    "arrowParens": "avoid"
-  },
   "scripts": {
     "build": "rimraf dist pkg && webpack",
     "start": "rimraf dist pkg && webpack-dev-server",

@@ -1,10 +1,12 @@
+// liquid_go, written by Aaron Kriegman <aaronkplus2@gmail.com>
+
 use rstar::RTree;
 use union_find::{QuickFindUf as UF, Union, UnionFind, UnionResult};
 use wasm_bindgen::prelude::*;
 
 use Team::*;
 
-const VROOM: f32 = 0.05;
+const VROOM: f32 = 0.002;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -14,6 +16,10 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 extern "C" {
   #[wasm_bindgen(js_namespace = console)]
   fn log(s: &str);
+  #[wasm_bindgen(js_namespace = console)]
+  fn time(s: &str);
+  #[wasm_bindgen(js_namespace = console, js_name = timeEnd)]
+  fn time_end(s: &str);
 }
 
 macro_rules! log {
@@ -24,9 +30,9 @@ macro_rules! dbg {
 }
 
 /// Just sets the console hook if in debug mode.
+#[cfg(debug_assertions)]
 #[wasm_bindgen(start)]
 pub fn main() {
-  #[cfg(debug_assertions)]
   console_error_panic_hook::set_once();
 }
 
@@ -52,8 +58,29 @@ pub struct Board {
   debug_image: Vec<Team>,
 }
 
+struct TreeParams {}
+
+impl rstar::RTreeParams for TreeParams {
+  const MIN_SIZE: usize = 3;
+  const MAX_SIZE: usize = 6;
+  const REINSERTION_COUNT: usize = 2;
+  type DefaultInsertionStrategy = rstar::RStarInsertionStrategy;
+}
+
+/// A wrapper around an RTree. Implements Union for use in a UnionFind, and
+/// checks for duplicates in Body::insert and Body::union. If elements are only
+/// added through these two methods, and Body is only constructed from duplicate
+/// free lists, then we can assume the invariant that Body is duplicate free.
+/// Reading and removing points can be done with the underlying RTree safely.
+#[derive(Debug)]
 struct Body {
-  libs: RTree<Point>,
+  libs: RTree<Point, TreeParams>,
+  /// A list of intersections in this body that would be liberties of another body,
+  /// for the sole purpose of restoring those liberties when this body dies.
+  stollen_libs: Vec<(Point, usize)>,
+  /// For use when reinserting liberties like above, so that we don't give liberties
+  /// to a dead body.
+  alive: bool,
 }
 
 /// These numbers are meant to be converted to little endian RGBA colors.
@@ -98,26 +125,27 @@ impl Board {
       y: self.teams.len() as isize * 4, // sizeof u32 / sizeof u8 = 4
     }
   }
-  /// This version does dome more expensive copying just so that it can color in the boundaries.
-  /// A cheap pseudorandom color is made for each body.
+  /// This version does dome more expensive copying just so that it can color in
+  /// the boundaries. A cheap pseudorandom color is made for each body.
   #[cfg(feature = "show_liberties")]
   pub fn get_image_slice(&mut self) -> Point {
     self.debug_image = self.teams.clone();
     for key in 0..self.bodies.size() {
       let color: u32 = 0xff000000
         | (key as u32 * 64 & 0xff) << 16
-        | (key as u32 * 32 & 0xff) << 8
+        | (key as u32 * 32 + 64 & 0xff) << 8
         | key as u32 * 16 & 0xff;
-      // Clone to appease the borrow checker.
-      for lib in self.bodies.get(key).libs.clone().iter() {
-        let idx = self.get_idx(*lib);
+      // Collect to appease the borrow checker. This wouldn't be necessary if
+      // Rust let functions take references to just part of an object.
+      for lib in self.bodies.get(key).libs.iter().cloned().collect::<Vec<_>>() {
+        let idx = self.get_idx(lib);
         // debug_assert!(self.teams[idx] != Black);
         self.debug_image[idx] = unsafe { std::mem::transmute::<_, _>(color) };
       }
     }
     Point {
-      x: self.debug_image.as_ptr() as usize,
-      y: self.debug_image.len() * 4, // sizeof u32 / sizeof u8 = 4
+      x: self.debug_image.as_ptr() as isize,
+      y: self.debug_image.len() as isize * 4, // sizeof u32 / sizeof u8 = 4
     }
   }
 
@@ -174,8 +202,8 @@ impl Board {
     count: u32,
     black_first: bool,
   ) {
-    let mut b_pos: Option<Point> = if b_active { Some(*b_pos) } else { None };
-    let mut w_pos: Option<Point> = if w_active { Some(*w_pos) } else { None };
+    let b_pos: Option<Point> = if b_active { Some(*b_pos) } else { None };
+    let w_pos: Option<Point> = if w_active { Some(*w_pos) } else { None };
     let mut b_key: Option<usize> = None;
     let mut w_key: Option<usize> = None;
     if self.b_pos == None || b_pos == None {
@@ -186,73 +214,91 @@ impl Board {
     };
 
     // Sumarry of the ugly spaghetti logic:
-    // If mouse is not down or we are over enemy territory, p_pos = None and p_key = 0.
-    // Otherwise set p_key to the existing body if over our own territory,
+    // If mouse is not down or we are over enemy territory, p_pos = None and p_key =
+    // 0. Otherwise set p_key to the existing body if over our own territory,
     // or a new body if over empty board. Do this for both players.
     // I claim that after this block, p_key will be non-zero iff p_pos is non-None.
-    for (pos_ref, key_ref, team) in
-      [(&mut b_pos, &mut b_key, Black), (&mut w_pos, &mut w_key, White)]
-    {
-      if let &mut Some(pos) = pos_ref {
+    for (pos, key_ref, team) in [(self.b_pos, &mut b_key, Black), (self.w_pos, &mut w_key, White)] {
+      if let Some(pos) = pos.map(Point::from_f32) {
         match (self.get_teams(pos), team) {
-          (Black, White) | (White, Black) => *pos_ref = None,
+          (Black, White) | (White, Black) => (),
           (Black, Black) | (White, White) => {
             *key_ref = Some(self.get_owner(pos));
           }
           (Empty, _) => {
-            *key_ref = Some(self.bodies.insert(Body { libs: RTree::bulk_load(vec![pos]) }))
+            *key_ref = Some(
+              self
+                .bodies
+                .insert(Body { libs: RTree::bulk_load_with_params(vec![pos]), ..Body::default() }),
+            )
           }
           (_, Empty) => unreachable!(),
         }
       }
     }
 
-    // What I'm really trying to do here is irreducible control flow.
-    let (ref f_pos, f_key, f_team, ref s_pos, s_key, s_team) = if black_first {
-      (self.b_pos, b_key, Black, self.w_pos, w_key, White)
-    } else {
-      (self.w_pos, w_key, White, self.b_pos, b_key, Black)
-    };
+    for &key in [b_key, w_key].iter().flatten() {
+      let bod = self.bodies.get(key);
+      log!("{} {} {}", bod.alive, bod.libs.size(), bod.stollen_libs.len());
+    }
 
     for _ in (0..count).step_by(2) {
-      if let (Some(ref mut self_pos), Some(pos)) = (self.b_pos, b_pos) {
+      if let (Some(self_pos), Some(pos)) = (&mut self.b_pos, b_pos) {
         self_pos[0] += (pos.x as f32 - self_pos[0]) * VROOM;
         self_pos[1] += (pos.y as f32 - self_pos[1]) * VROOM;
       }
-      if let (Some(ref mut self_pos), Some(pos)) = (self.w_pos, w_pos) {
+      if let (Some(self_pos), Some(pos)) = (&mut self.w_pos, w_pos) {
         self_pos[0] += (pos.x as f32 - self_pos[0]) * VROOM;
         self_pos[1] += (pos.y as f32 - self_pos[1]) * VROOM;
       }
-      // I could technically remove these if statements because the if statement in assimilate
-      // will fail for the 0th Body. TODO check if this makes a difference.
+
+      // What I'm really trying to do here is irreducible control flow.
+      let (f_pos, f_key, f_team, s_pos, s_key, s_team) = if black_first {
+        (self.b_pos, b_key, Black, self.w_pos, w_key, White)
+      } else {
+        (self.w_pos, w_key, White, self.b_pos, b_key, Black)
+      };
+      let f_pos = f_pos.map(Point::from_f32);
+      let s_pos = s_pos.map(Point::from_f32);
+      // I could technically remove these if statements because the if statement in
+      // assimilate will fail for the 0th Body. TODO check if this makes a
+      // difference.
       if let (Some(pos), Some(key)) = (f_pos, f_key) {
-        self.assimilate(*pos, key, f_team);
+        if self.assimilate(pos, key, f_team) {
+          break;
+        }
       }
       if let (Some(pos), Some(key)) = (s_pos, s_key) {
-        self.assimilate(*pos, key, s_team);
-        self.assimilate(*pos, key, s_team);
+        if self.assimilate(pos, key, s_team) {
+          break;
+        }
+        if self.assimilate(pos, key, s_team) {
+          break;
+        }
       }
       if let (Some(pos), Some(key)) = (f_pos, f_key) {
-        self.assimilate(*pos, key, f_team);
+        if self.assimilate(pos, key, f_team) {
+          break;
+        }
       }
     }
   }
 
-  /// Tell bodies[bod_key] to absorb it's nearest liberty.
-  fn assimilate(&mut self, spigot: [f32; 2], bod_key: usize, us: Team) {
-    let spigot = Point::from_f32(spigot);
+  /// Tell bodies[bod_key] to absorb it's nearest liberty. Returns true if there's no
+  fn assimilate(&mut self, spigot: Point, bod_key: usize, us: Team) -> bool {
     // TODO: some of these `bodies.get` calls should be merged, since
     // `get` is not a simple read on a UnionFind.
     if let Some(pos) = self.bodies.get_mut(bod_key).libs.pop_nearest_neighbor(&spigot) {
-      // TODO: once we properly prune opponent liberties this check will no
-      // longer be necessary. Update: that might not be true, idk.
       if self.get_teams(pos) != Empty {
-        return;
+        dbg!("Liberties should always be empty board.");
+        panic!("Liberties should always be empty board.");
+        // return false;
       }
 
       *self.get_teams_mut(pos) = us;
       *self.get_owner_mut(pos) = bod_key;
-      dbg!(self.get_teams(pos));
+      // Neighboring bodies to be `check_dead`ed at the end of this function.
+      let mut neighbors = Vec::new();
 
       for lib in [
         if pos.x > 0 { Some(Point { x: pos.x - 1, ..pos }) } else { None },
@@ -265,27 +311,72 @@ impl Board {
       {
         match (us, self.get_teams(lib)) {
           (Black, White) | (White, Black) => {
-            // TODO: see below.
+            let other_key = self.get_owner(lib);
+            let other = self.bodies.get_mut(other_key);
+            other.libs.remove(&pos);
+            other.stollen_libs.push((lib, bod_key));
+            self.bodies.get_mut(bod_key).stollen_libs.push((pos, other_key));
+            neighbors.push(other_key);
           }
           (Black, Black) | (White, White) => {
-            if self.bodies.union(bod_key, self.get_owner(lib)) {
-              // ^^^ This function call short circuits if they're already the same body.
-
-              // TODO: we should remove a liberty from `owner[lib]` here. Doing this efficiently will
-              // require switching from a BinaryHeap to a BTree (I think).
-            }
+            self.bodies.union(bod_key, self.get_owner(lib));
+            self.bodies.get_mut(bod_key).libs.remove(&pos);
           }
 
           (_, Empty) => {
-            self.bodies.get_mut(bod_key).libs.insert(lib);
+            self.bodies.get_mut(bod_key).insert(lib);
           }
-          (Empty, _) => panic!("You cannot assimilate back into the board (yet)."),
+          (Empty, _) => panic!("You cannot assimilate back into the board."),
         }
       }
+
+      // Check if oponent is captured first.
+      for neighbor in neighbors {
+        self.check_dead(neighbor);
+      }
+      self.check_dead(bod_key)
     } else {
-      // We have no liberties remaining. We could capture the body here,
-      // but that's a hacky solution because this only gets triggered when
-      // we try to grow the surrounded body.
+      dbg!("Assimilate should never be called on a body with no liberties.");
+      panic!("Assimilate should never be called on a body with no liberties.");
+      // true
+    }
+  }
+
+  /// Check if `bod` is dead, and if so remove it and return true.
+  fn check_dead(&mut self, bod_key: usize) -> bool {
+    let bod = self.bodies.get_mut(bod_key);
+    if bod.libs.size() == 0 {
+      log!("freeing {}", bod_key);
+      // We can't shrink our UnionFind, but we can still free up the memory of this now unused body.
+      let corpse = std::mem::take(bod);
+      bod.alive = false;
+      self.teams.iter_mut().zip(self.owner.iter_mut()).for_each(|(t, o)| {
+        if self.bodies.find(*o) == self.bodies.find(bod_key) {
+          *t = Empty;
+          *o = 0;
+        }
+      });
+
+      for (lib, other_key) in corpse.stollen_libs {
+        let other = self.bodies.get_mut(other_key);
+        if other.alive {
+          other.libs.insert(lib);
+        }
+      }
+      true
+    } else {
+      false
+    }
+  }
+}
+
+impl Body {
+  /// A wrapper around RTree::insert which checks for duplicates,
+  /// effectively making an RTreeSet.
+  #[inline]
+  fn insert(&mut self, lib: Point) {
+    if !self.libs.contains(&lib) {
+      self.libs.insert(lib);
     }
   }
 }
@@ -293,18 +384,29 @@ impl Board {
 impl Union for Body {
   /// Always returns Left. This way the caller can and must
   /// ensure that the currently active body is the parent.
-  fn union(mut lval: Self, rval: Self) -> UnionResult<Self> {
-    // This rebuilds the tree with RTree::bulk_load(), which requires allocating the elements
-    // into a Vec first. I wonder if there's a more efficient way to do this? It's probably good
-    // to rebuild the tree every now and then anyways to maintain quality? idk.
-    lval.libs = RTree::bulk_load(lval.libs.iter().chain(rval.libs.iter()).copied().collect());
+  fn union(mut lval: Self, mut rval: Self) -> UnionResult<Self> {
+    // Remove duplicates. If we do this here and when inserting then we can assume uniqueness
+    // when popping and deleteing.
+    lval.libs.iter().for_each(|p| {
+      // I read that `for_each` is sometimes faster than for loops. It's really just a matter
+      // of taste though.
+      rval.libs.remove(p);
+    });
+    // This rebuilds the tree with RTree::bulk_load(), which requires allocating the
+    // elements into a Vec first. I wonder if there's a more efficient way to do
+    // this? It's probably good to rebuild the tree every now and then anyways
+    // to maintain quality? idk.
+    lval.libs =
+      RTree::bulk_load_with_params(lval.libs.iter().chain(rval.libs.iter()).copied().collect());
+
+    lval.stollen_libs.append(&mut rval.stollen_libs);
     UnionResult::Left(lval)
   }
 }
 
 impl Default for Body {
   fn default() -> Self {
-    Body { libs: RTree::new() }
+    Body { libs: RTree::new_with_params(), stollen_libs: vec![], alive: true }
   }
 }
 

@@ -5,7 +5,7 @@
   "scripts": {
     "build": "rimraf dist pkg && webpack",
     "start": "rimraf dist pkg && webpack-dev-server",
-    "dist": "npm run build && scp dist/* ak2313@shell.srcf.net:~/public_html/liquid_go"
+    "dist": "npm run build && wasm-opt dist/*.wasm -o dist/*.wasm --strip-debug --dce -O3 && scp dist/* ak2313@shell.srcf.net:~/public_html/liquid_go"
   },
   "devDependencies": {
     "@wasm-tool/wasm-pack-plugin": "1.6.0",

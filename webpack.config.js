@@ -26,7 +26,7 @@ module.exports = {
 
     new WasmPackPlugin({
       crateDirectory: __dirname,
-      // extraArgs: "--dev",
+      // extraArgs: "-- -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --release",
     }),
   ],
 };

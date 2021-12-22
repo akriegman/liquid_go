@@ -65,12 +65,11 @@ loop();
 // transmutation problem and my finicky Rust APIs problem at the same time.
 function draw() {
   const { x: ptr, y: len } = board.get_image_slice();
-  const tmp = new ImageData(
+  createImageBitmap(new ImageData(
     new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
     CELLS,
     CELLS
-  );
-  createImageBitmap(tmp)
+  ))
     .then(bitmap => {
       ctx.drawImage(bitmap, 0, 0, PIXEL, PIXEL);
     })
@@ -78,7 +77,7 @@ function draw() {
 }
 
 function loop(now) {
-  board.spill(mouse, mouseL, mouse, mouseR, 100, blackFirst);
+  board.spill(mouse, mouseL, mouse, mouseR, 301, blackFirst);
   draw();
 
   frames += 1;
@@ -92,5 +91,5 @@ function loop(now) {
 }
 
 function updatePosition(event) {
-  mouse.set(event.offsetX * CPU / PPU, event.offsetY * CPU / PPU);
+  mouse.set(event.offsetX * (CPU / PPU), event.offsetY * CPU / PPU);
 }

@@ -6,35 +6,35 @@ use wasm_bindgen::prelude::*;
 
 use Team::*;
 
-const VROOM: f32 = 0.002;
+const VROOM: f32 = 0.0015;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-#[wasm_bindgen]
-extern "C" {
-  #[wasm_bindgen(js_namespace = console)]
-  fn log(s: &str);
-  #[wasm_bindgen(js_namespace = console)]
-  fn time(s: &str);
-  #[wasm_bindgen(js_namespace = console, js_name = timeEnd)]
-  fn time_end(s: &str);
-}
+// #[wasm_bindgen]
+// extern "C" {
+//   #[wasm_bindgen(js_namespace = console)]
+//   fn log(s: &str);
+//   #[wasm_bindgen(js_namespace = console)]
+//   fn time(s: &str);
+//   #[wasm_bindgen(js_namespace = console, js_name = timeEnd)]
+//   fn time_end(s: &str);
+// }
 
-macro_rules! log {
-  ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
-}
-macro_rules! dbg {
-  ($($t:tt)*) => (log(&format_args!("{:?}", $($t)*).to_string()))
-}
+// macro_rules! log {
+//   ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
+// }
+// macro_rules! dbg {
+//   ($($t:tt)*) => (log(&format_args!("{:?}", $($t)*).to_string()))
+// }
 
-/// Just sets the console hook if in debug mode.
-#[cfg(debug_assertions)]
-#[wasm_bindgen(start)]
-pub fn main() {
-  console_error_panic_hook::set_once();
-}
+// /// Just sets the console hook if in debug mode.
+// #[cfg(debug_assertions)]
+// #[wasm_bindgen(start)]
+// pub fn main() {
+//   console_error_panic_hook::set_once();
+// }
 
 #[wasm_bindgen]
 pub struct Board {
@@ -237,11 +237,6 @@ impl Board {
       }
     }
 
-    for &key in [b_key, w_key].iter().flatten() {
-      let bod = self.bodies.get(key);
-      log!("{} {} {}", bod.alive, bod.libs.size(), bod.stollen_libs.len());
-    }
-
     for _ in (0..count).step_by(2) {
       if let (Some(self_pos), Some(pos)) = (&mut self.b_pos, b_pos) {
         self_pos[0] += (pos.x as f32 - self_pos[0]) * VROOM;
@@ -290,7 +285,6 @@ impl Board {
     // `get` is not a simple read on a UnionFind.
     if let Some(pos) = self.bodies.get_mut(bod_key).libs.pop_nearest_neighbor(&spigot) {
       if self.get_teams(pos) != Empty {
-        dbg!("Liberties should always be empty board.");
         panic!("Liberties should always be empty board.");
         // return false;
       }
@@ -336,7 +330,6 @@ impl Board {
       }
       self.check_dead(bod_key)
     } else {
-      dbg!("Assimilate should never be called on a body with no liberties.");
       panic!("Assimilate should never be called on a body with no liberties.");
       // true
     }
@@ -346,7 +339,6 @@ impl Board {
   fn check_dead(&mut self, bod_key: usize) -> bool {
     let bod = self.bodies.get_mut(bod_key);
     if bod.libs.size() == 0 {
-      log!("freeing {}", bod_key);
       // We can't shrink our UnionFind, but we can still free up the memory of this now unused body.
       let corpse = std::mem::take(bod);
       bod.alive = false;

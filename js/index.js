@@ -1,6 +1,7 @@
-"use strict";
-import * as wasm from "../pkg/index.js";
-import { memory } from "../pkg/index_bg.wasm";
+'use strict';
+import * as wasm from '../pkg/index.js';
+import { memory } from '../pkg/index_bg.wasm';
+import rtc from './rtc.js';
 
 const CPU = 2; // Cells per unit
 const PPU = 1; // Pixel per unit
@@ -13,25 +14,29 @@ let mouseL = false;
 let mouseR = false;
 
 const board = wasm.Board.new(CELLS);
-const save = document.getElementById("save");
-const canvas = document.getElementById("board");
-const ctx = canvas.getContext("2d");
+const save = document.getElementById('save');
+const canvas = document.getElementById('board');
+const offscreen = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+const ctxOff = offscreen.getContext('2d');
 canvas.width = PIXEL;
 canvas.height = PIXEL;
+offscreen.width = CELLS;
+offscreen.height = CELLS;
 if (CPU == 1) {
-  canvas.style.imageRendering = "pixelated";
+  canvas.style.imageRendering = 'pixelated';
   ctx.imageSmoothingEnabled = false;
 }
 
-save.addEventListener("click", event => {
+save.addEventListener('click', event => {
   var image = canvas
-    .toDataURL("image/png")
-    .replace("image/png", "image/octet-stream");
+    .toDataURL('image/png')
+    .replace('image/png', 'image/octet-stream');
   window.location.href = image;
 });
-canvas.addEventListener("contextmenu", event => event.preventDefault());
-canvas.addEventListener("mousemove", updatePosition);
-canvas.addEventListener("mousedown", event => {
+canvas.addEventListener('contextmenu', event => event.preventDefault());
+canvas.addEventListener('mousemove', updatePosition);
+canvas.addEventListener('mousedown', event => {
   switch (event.button) {
     case 0:
       mouseL = true;
@@ -42,7 +47,7 @@ canvas.addEventListener("mousedown", event => {
   }
   updatePosition(event);
 });
-canvas.addEventListener("mouseup", event => {
+canvas.addEventListener('mouseup', event => {
   switch (event.button) {
     case 0:
       mouseL = false;
@@ -53,11 +58,23 @@ canvas.addEventListener("mouseup", event => {
   }
   updatePosition(event);
 });
+
 let blackFirst = true;
 let frames = 0;
 let then = performance.now();
 
 loop();
+
+rtc.join('').then(dc => {
+  console.log('received data channel');
+  dc.addEventListener('open', event => {
+    dc.send('Hello');
+  });
+
+  dc.addEventListener('message', event => {
+    console.log(event.data);
+  });
+});
 
 // If this program ever exits, remember to call board.free() and mouse.free().
 
@@ -65,19 +82,25 @@ loop();
 // transmutation problem and my finicky Rust APIs problem at the same time.
 function draw() {
   const { x: ptr, y: len } = board.get_image_slice();
-  createImageBitmap(new ImageData(
+  // createImageBitmap(new ImageData(
+  //   new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
+  //   CELLS,
+  //   CELLS
+  // ))
+  //   .then(bitmap => {
+  //     ctx.drawImage(bitmap, 0, 0, PIXEL, PIXEL);
+  //   })
+  //   .catch(console.error);
+  ctxOff.putImageData(new ImageData(
     new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
     CELLS,
     CELLS
-  ))
-    .then(bitmap => {
-      ctx.drawImage(bitmap, 0, 0, PIXEL, PIXEL);
-    })
-    .catch(console.error);
+  ), 0, 0);
+  ctx.drawImage(offscreen, 0, 0, PIXEL, PIXEL);
 }
 
 function loop(now) {
-  board.spill(mouse, mouseL, mouse, mouseR, 301, blackFirst);
+  board.spill(mouse, mouseL, mouse, mouseR, 300, blackFirst);
   draw();
 
   frames += 1;

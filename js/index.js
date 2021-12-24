@@ -9,12 +9,16 @@ const UNITS = 600; // Units per side
 const CELLS = UNITS * CPU; // Cells per side
 const PIXEL = UNITS * PPU; // Pixel per side
 
-let mouse = wasm.Point.new(CELLS / 2, CELLS / 2);
-let mouseL = false;
+let mouse = { left: false, x: CELLS / 2, y: CELLS / 2 };
+// let mouseL = false;
 let mouseR = false;
+const thisMouse = wasm.Point.new(CELLS / 2, CELLS / 2);
+const thatMouse = wasm.Point.new(CELLS / 2, CELLS / 2);
 
 const board = wasm.Board.new(CELLS);
 const save = document.getElementById('save');
+const room = document.getElementById('room');
+const play = document.getElementById('play');
 const canvas = document.getElementById('board');
 const offscreen = document.createElement('canvas');
 const ctx = canvas.getContext('2d');
@@ -34,12 +38,13 @@ save.addEventListener('click', event => {
     .replace('image/png', 'image/octet-stream');
   window.location.href = image;
 });
+play.addEventListener('click', start)
 canvas.addEventListener('contextmenu', event => event.preventDefault());
 canvas.addEventListener('mousemove', updatePosition);
 canvas.addEventListener('mousedown', event => {
   switch (event.button) {
     case 0:
-      mouseL = true;
+      mouse.left = true;
       break;
     case 2:
       mouseR = true;
@@ -50,7 +55,7 @@ canvas.addEventListener('mousedown', event => {
 canvas.addEventListener('mouseup', event => {
   switch (event.button) {
     case 0:
-      mouseL = false;
+      mouse.left = false;
       break;
     case 2:
       mouseR = false;
@@ -59,22 +64,49 @@ canvas.addEventListener('mouseup', event => {
   updatePosition(event);
 });
 
-let blackFirst = true;
 let frames = 0;
 let then = performance.now();
 
-loop();
 
-rtc.join('').then(dc => {
-  console.log('received data channel');
-  dc.addEventListener('open', event => {
-    dc.send('Hello');
-  });
+function start() {
+  rtc.join(room.value).then(({ isBlack, dc }) => {
 
-  dc.addEventListener('message', event => {
-    console.log(event.data);
+    let theseSamples = [];
+    let thoseSamples = [];
+    let blackFirst = true;
+
+    dc.addEventListener('open', event => {
+      loop();
+
+      setInterval(() => {
+        if (theseSamples.length < 60) {
+          theseSamples.push(mouse);
+          dc.send(JSON.stringify(mouse));
+        } else {
+          console.log('Ahead of opponent, skipping sample');
+        }
+
+        while (theseSamples.length > 0 && thoseSamples.length > 0) {
+          thisMouse.set(theseSamples[0].x, theseSamples[0].y);
+          thatMouse.set(thoseSamples[0].x, thoseSamples[0].y);
+          if (isBlack) {
+            board.spill(thisMouse, theseSamples[0].left, thatMouse, thoseSamples[0].left, 300, blackFirst)
+          } else {
+            board.spill(thatMouse, thoseSamples[0].left, thisMouse, theseSamples[0].left, 300, blackFirst)
+          }
+          theseSamples.shift();
+          thoseSamples.shift();
+          blackFirst = !blackFirst;
+        }
+
+      }, 17);
+    });
+
+    dc.addEventListener('message', event => {
+      thoseSamples.push(JSON.parse(event.data));
+    });
   });
-});
+}
 
 // If this program ever exits, remember to call board.free() and mouse.free().
 
@@ -82,15 +114,6 @@ rtc.join('').then(dc => {
 // transmutation problem and my finicky Rust APIs problem at the same time.
 function draw() {
   const { x: ptr, y: len } = board.get_image_slice();
-  // createImageBitmap(new ImageData(
-  //   new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
-  //   CELLS,
-  //   CELLS
-  // ))
-  //   .then(bitmap => {
-  //     ctx.drawImage(bitmap, 0, 0, PIXEL, PIXEL);
-  //   })
-  //   .catch(console.error);
   ctxOff.putImageData(new ImageData(
     new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
     CELLS,
@@ -100,11 +123,9 @@ function draw() {
 }
 
 function loop(now) {
-  board.spill(mouse, mouseL, mouse, mouseR, 300, blackFirst);
   draw();
 
   frames += 1;
-  blackFirst = !blackFirst;
   if (now - then > 5000) {
     console.log(frames / (now - then) * 1000);
     then = now;
@@ -114,5 +135,6 @@ function loop(now) {
 }
 
 function updatePosition(event) {
-  mouse.set(event.offsetX * (CPU / PPU), event.offsetY * CPU / PPU);
+  mouse.x = event.offsetX * CPU / PPU;
+  mouse.y = event.offsetY * CPU / PPU;
 }

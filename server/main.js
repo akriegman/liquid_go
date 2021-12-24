@@ -1,8 +1,13 @@
 'use strict';
 const { Server } = require('socket.io');
 
-const io = new Server(8090, {});
-log('Listening on 8090');
+const io = new Server(6251, {
+    cors: {
+        origin: 'http://ak2313.user.srcf.net',
+        methods: ['GET', 'POST'],
+    }
+});
+log('Listening on 6251');
 
 io.on('connection', socket => {
     log('New connection ' + socket.id);
@@ -13,7 +18,7 @@ io.on('connection', socket => {
 
         if (players.length >= 1) {
             log('Starting match');
-            opponent = players[0];
+            let opponent = players[0];
             opponent.leave(room);
 
             opponent.on('offer', offer => socket.emit('offer', offer));

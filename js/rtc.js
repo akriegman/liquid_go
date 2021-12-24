@@ -6,27 +6,51 @@ import { io } from 'socket.io-client';
 const configuration = {
     'iceServers': [
         { 'urls': 'stun:stun.stunprotocol.org:3478' },
+        { 'urls': 'stun:stun01.sipphone.com' },
+        { 'urls': 'stun:stun.ekiga.net' },
+        { 'urls': 'stun:stun.fwdnet.net' },
+        { 'urls': 'stun:stun.ideasip.com' },
+        { 'urls': 'stun:stun.iptel.org' },
+        { 'urls': 'stun:stun.rixtelecom.se' },
+        { 'urls': 'stun:stun.schlund.de' },
+        { 'urls': 'stun:stun.l.google.com:19302' },
+        { 'urls': 'stun:stun1.l.google.com:19302' },
+        { 'urls': 'stun:stun2.l.google.com:19302' },
+        { 'urls': 'stun:stun3.l.google.com:19302' },
+        { 'urls': 'stun:stun4.l.google.com:19302' },
+        { 'urls': 'stun:stunserver.org' },
+        { 'urls': 'stun:stun.softjoys.com' },
+        { 'urls': 'stun:stun.voiparound.com' },
+        { 'urls': 'stun:stun.voipbuster.com' },
+        { 'urls': 'stun:stun.voipstunt.com' },
+        { 'urls': 'stun:stun.voxgratia.org' },
+        { 'urls': 'stun:stun.xten.com' },
     ]
 }
 
 export default { join };
 
 function join(room) {
-    const socket = io('ws://localhost:8090', { transports: ['websocket', 'polling'] });
+    const socket = io('https://ak2313.user.srcf.net/', { transports: ['polling'/*, 'websocket'*/] });
 
     const pc = new RTCPeerConnection(configuration);
 
+    pc.onicecandidateerror = event => console.log('ICE candidate error: ' + event.errorCode);
+
+    pc.onicegatheringstatechange = event => console.log(pc.iceGatheringState);
+    pc.onconnectionstatechange = event => console.log(pc.connectionState);
+
     // Listen for local ICE candidates on the local RTCPeerConnection
     pc.addEventListener('icecandidate', event => {
-        console.log('icecandidate event');
         if (event.candidate) {
-            console.log('Sending ICE candidate');
             socket.emit('icecandidate', event.candidate);
+            console.log(event.candidate);
         }
     });
 
     // Listen for remote ICE candidates and add them to the local RTCPeerConnection
     socket.on('icecandidate', async candidate => {
+        console.log(candidate);
         try {
             await pc.addIceCandidate(candidate);
         } catch (e) {
@@ -52,7 +76,7 @@ function join(room) {
         socket.on('matched', async first => {
             if (first) {
                 // caller side
-                res(pc.createDataChannel('data'));
+                res({ isBlack: true, dc: pc.createDataChannel('data') });
 
                 socket.on('answer', async answer => {
                     await pc.setRemoteDescription(new RTCSessionDescription(answer))
@@ -62,12 +86,11 @@ function join(room) {
                 await pc.setLocalDescription(offer)
                     .catch(console.error);
                 socket.emit('offer', offer);
-                console.log(offer);
 
             } else {
                 // recipient side
                 pc.addEventListener('datachannel', event => {
-                    res(event.channel);
+                    res({ isBlack: false, dc: event.channel });
                 });
 
                 socket.on('offer', async offer => {
@@ -80,7 +103,5 @@ function join(room) {
                 });
             }
         });
-
-        // res(pc.createDataChannel('data', { negotiated: true, id: 0 }));
     });
 }

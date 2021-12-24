@@ -2,8 +2,8 @@
 <html>
 
 <head>
-  <meta charset="UTF-8">
-  <link rel="icon" type="image/png" href="./favicon.ico">
+  <meta charset='UTF-8'>
+  <link rel='icon' type='image/png' href='./favicon.ico'>
   <title>Liquid Go</title>
   <style>
     body {
@@ -17,21 +17,27 @@
       display: block;
       margin-left: auto;
       margin-right: auto;
+      margin-top: 4px;
     }
   </style>
 </head>
 
 <body>
   <p>
-    This is a super-preliminary version of my game Liquid Go. More features
-    are to come, including multiplayer, capturing surrounded stones, and hopefully
-    not crashing your browser. In the meantime this is pretty fun to play with. Left
-    click to place black stones, right click for white stones, and click the save button
-    to save your creation.
+    Enter a keyword in the box and press play to create or join a game, or leave the box
+    blank to find a random opponent. Left click to place black stones, right click for white stones, and click the save
+    button to save your creation.
   </p>
-  <button id="save">save</button>
-  <canvas id="board"></canvas>
-  <script src="index.js"></script>
+  <button id='save'>save</button>
+  <input id='room' />
+  <button id='play'>play</button>
+  <canvas id='board'></canvas>
+  <a href="https://www.srcf.net/"><img src="https://www.srcf.net/images/poweredby-dark.svg"
+      alt="Powered by the Student-Run Computing Facility (SRCF)"></a>
+
+  <script src="https://unpkg.com/react@17/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js" crossorigin></script>
+  <script src='index.js'></script>
 </body>
 
 </html>

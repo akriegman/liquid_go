@@ -1,0 +1,14 @@
+{
+  "name": "liquid_go_server",
+  "version": "1.0.0",
+  "description": "Simple relay server for establishing a WebRTC connection.",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Aaron Kriegman <aaronkplus2@gmail.com>",
+  "license": "ISC",
+  "dependencies": {
+    "socket.io": "^4.4.0"
+  }
+}

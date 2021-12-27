@@ -6,8 +6,6 @@ use wasm_bindgen::prelude::*;
 
 use Team::*;
 
-const VROOM: f32 = 0.0015;
-
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -38,10 +36,18 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen]
 pub struct Board {
-  w_pos: Option<[f32; 2]>,
+  // OPTIONS AND INPUT -----------------------------------------------------
   b_pos: Option<[f32; 2]>,
+  b_tail: Option<[f32; 2]>,
+  w_pos: Option<[f32; 2]>,
+  w_tail: Option<[f32; 2]>,
+
+  capturing: bool,
   /// Side length.
   size: usize,
+
+  // INTERNALS -------------------------------------------------------------
+
   // The board data is split into two separate
   // Vecs instead of one Vec of structs so that
   // hopefully the data will need no additional
@@ -101,10 +107,13 @@ pub struct Point {
 
 #[wasm_bindgen]
 impl Board {
-  pub fn new(size: usize) -> Self {
+  pub fn new(size: usize, capturing: bool) -> Self {
     Self {
       b_pos: None,
+      b_tail: None,
       w_pos: None,
+      w_tail: None,
+      capturing,
       size,
       teams: vec![Empty; size * size],
       owner: vec![0; size * size],
@@ -147,6 +156,10 @@ impl Board {
       x: self.debug_image.as_ptr() as isize,
       y: self.debug_image.len() as isize * 4, // sizeof u32 / sizeof u8 = 4
     }
+  }
+
+  pub fn set_capturing(&mut self, capturing: bool) {
+    self.capturing = capturing;
   }
 
   #[inline]
@@ -208,9 +221,11 @@ impl Board {
     let mut w_key: Option<usize> = None;
     if self.b_pos == None || b_pos == None {
       self.b_pos = b_pos.map(Point::as_f32);
+      self.b_tail = self.b_pos;
     };
     if self.w_pos == None || w_pos == None {
       self.w_pos = w_pos.map(Point::as_f32);
+      self.w_tail = self.w_pos;
     };
 
     // Sumarry of the ugly spaghetti logic:
@@ -237,14 +252,17 @@ impl Board {
       }
     }
 
+    let vroom = 1. / count as f32;
     for _ in (0..count).step_by(2) {
-      if let (Some(self_pos), Some(pos)) = (&mut self.b_pos, b_pos) {
-        self_pos[0] += (pos.x as f32 - self_pos[0]) * VROOM;
-        self_pos[1] += (pos.y as f32 - self_pos[1]) * VROOM;
-      }
-      if let (Some(self_pos), Some(pos)) = (&mut self.w_pos, w_pos) {
-        self_pos[0] += (pos.x as f32 - self_pos[0]) * VROOM;
-        self_pos[1] += (pos.y as f32 - self_pos[1]) * VROOM;
+      for tup in
+        [(&mut self.b_tail, &mut self.b_pos, b_pos), (&mut self.w_tail, &mut self.w_pos, w_pos)]
+      {
+        if let (Some(self_tail), Some(self_pos), Some(pos)) = tup {
+          self_tail[0] += (pos.x as f32 - self_tail[0]) * vroom;
+          self_tail[1] += (pos.y as f32 - self_tail[1]) * vroom;
+          self_pos[0] += (self_tail[0] - self_pos[0]) * vroom;
+          self_pos[1] += (self_tail[1] - self_pos[1]) * vroom;
+        }
       }
 
       // What I'm really trying to do here is irreducible control flow.
@@ -285,8 +303,11 @@ impl Board {
     // `get` is not a simple read on a UnionFind.
     if let Some(pos) = self.bodies.get_mut(bod_key).libs.pop_nearest_neighbor(&spigot) {
       if self.get_teams(pos) != Empty {
-        panic!("Liberties should always be empty board.");
-        // return false;
+        // panic!("Liberties should always be empty board.");
+        // This case should only occur when two bodies are initiated
+        // at the same position on the same frame. We do not panic so
+        // we can handle this case gracefully.
+        return true;
       }
 
       *self.get_teams_mut(pos) = us;
@@ -330,13 +351,18 @@ impl Board {
       }
       self.check_dead(bod_key)
     } else {
-      panic!("Assimilate should never be called on a body with no liberties.");
-      // true
+      // panic!("Assimilate should never be called on a body with no liberties.");
+      // This case only occurs when capturing is disabled then reenabled. We will not panic
+      // here so we can handle this case gracefully.
+      self.check_dead(bod_key)
     }
   }
 
   /// Check if `bod` is dead, and if so remove it and return true.
   fn check_dead(&mut self, bod_key: usize) -> bool {
+    if !self.capturing {
+      return false;
+    }
     let bod = self.bodies.get_mut(bod_key);
     if bod.libs.size() == 0 {
       // We can't shrink our UnionFind, but we can still free up the memory of this now unused body.
@@ -352,7 +378,7 @@ impl Board {
       for (lib, other_key) in corpse.stollen_libs {
         let other = self.bodies.get_mut(other_key);
         if other.alive {
-          other.libs.insert(lib);
+          other.insert(lib);
         }
       }
       true

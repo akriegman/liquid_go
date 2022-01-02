@@ -15,10 +15,13 @@ export default class Board extends Component {
   constructor(props) {
     super(props);
     this.canvas = React.createRef();
+    this.state = {
+      refsReady: false,
+    };
   }
 
   componentDidMount() {
-    this.props.cells = Math.max(1, this.props.cells);
+    this.setState({ refsReady: true });
     
     const offscreen = document.createElement('canvas');
     const ctx = this.canvas.current.getContext('2d');
@@ -35,6 +38,7 @@ export default class Board extends Component {
     this.blackMouse = wasm.Point.new(this.props.cells / 2, this.props.cells / 2);
     this.whiteMouse = wasm.Point.new(this.props.cells / 2, this.props.cells / 2);
     this.mounted = true;
+    this.doDraw = true;
     this.blackFirst = true;
     this.mouse = { left: false, right: false, x: this.props.cells / 2, y: this.props.cells / 2 };
 
@@ -43,24 +47,28 @@ export default class Board extends Component {
       ctx.imageSmoothingEnabled = false;
     }
 
-    const loop = () => {
+    this.draw = buffer => {
       // I'm doing some manual bindings here. This takes care of my vector
       // transmutation problem and my finicky Rust APIs problem at the same time.
-      const { x: ptr, y: len } = this.board.get_image_slice();
+      const slice = this.board.get_image_slice(buffer);
       ctxOff.putImageData(
         new ImageData(
-          new Uint8ClampedArray(memory.buffer).subarray(ptr, ptr + len),
+          new Uint8ClampedArray(memory.buffer).subarray(slice.x, slice.x + slice.y),
           this.props.cells,
           this.props.cells
-        ),
-        0,
-        0
+        ), 0, 0
       );
       ctx.drawImage(offscreen, 0, 0, this.props.pixels, this.props.pixels);
+      slice.free();
+    };
+    
+    const loop = () => {
+      if (!this.mounted) return;
+      
+      if (this.doDraw) this.draw(0);
+      this.doDraw = false;
 
-      if (this.mounted) {
-        requestAnimationFrame(loop);
-      }
+      requestAnimationFrame(loop);
     };
     loop();
 
@@ -80,21 +88,9 @@ export default class Board extends Component {
       }
       this.updatePosition(event);
     });
-    this.canvas.current.addEventListener('touchstart', event => {
-      const touch = this.getTouch(event);
-      if (touch) {
-        this.mouse.left = true;
-        this.updatePosition(touch);
-      }
-    });
-    this.canvas.current.addEventListener('touchend', event => {
-      const touch = this.getTouch(event);
-      if (touch) {
-        this.mouse.left = false;
-        this.updatePosition(touch);
-      }
-    });
-    this.canvas.current.addEventListener('touchmove', event => this.updatePosition(this.getTouch(event)));
+    this.canvas.current.addEventListener('touchstart', event => this.updateTouch(event, true));
+    this.canvas.current.addEventListener('touchend', event => this.updateTouch(event, false));
+    this.canvas.current.addEventListener('touchmove', event => this.updateTouch(event, null));
     this.canvas.current.addEventListener('touchcancel', console.log);
   }
   
@@ -117,7 +113,7 @@ export default class Board extends Component {
   spill(black, white) {
     this.blackMouse.set(black.x, black.y);
     this.whiteMouse.set(white.x, white.y);
-    this.board.spill(
+    const prisoners = this.board.spill(
       this.blackMouse,
       black.active,
       this.whiteMouse,
@@ -126,40 +122,120 @@ export default class Board extends Component {
       this.blackFirst
     );
     this.blackFirst = !this.blackFirst;
+    this.doDraw = black.active || white.active;
+    
+    const result = { black: prisoners.x, white: prisoners.y };
+    prisoners.free();
+    return result;
+  }
+  
+  score(method) {
+    const score = this.board.score();
+    const result = {
+      black: score['b_' + method],
+      white: score['w_' + method],
+    };
+    score.free();
+    
+    this.doDraw = false;
+    if (method != 'stone') this.draw(1);
+    
+    return result;
   }
 
   render() {
-    return <canvas ref={this.canvas} width={this.props.pixels} height={this.props.pixels}
-      style={{
-        display: 'inline-block',
-        'margin-left': 'auto',
-        'margin-right': 'auto',
-        flex: '0 0'
-      }}>
-    </canvas>;
+    return <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+      <div style={{ flex: '0 0', whiteSpace: 'nowrap', display: 'block', marginRight: '12px' }} className='accent'>
+        {this.props.children}
+        {this.state.refsReady
+          ? <>
+            <br/><Save canvas={this.canvas}/>
+            <br/><Record canvas={this.canvas}/>
+          </>
+          : <></>}
+      </div>
+      
+      <canvas ref={this.canvas} width={this.props.pixels} height={this.props.pixels}
+        style={{
+          display: 'inline-block',
+          margin: '0 auto',
+          flex: '0 0'
+        }}>
+      </canvas>
+    </div>;
   }
 
   updatePosition = event => {
     // `event` is either a MouseEvent or a Touch.
+    pauseEvent(event);
     const rect = this.canvas.current.getBoundingClientRect();
     this.mouse.x = Math.max(Math.min(Math.round((event.clientX - rect.left) * this.props.cells / this.props.pixels), this.props.cells - 1), 0);
     this.mouse.y = Math.max(Math.min(Math.round((event.clientY - rect.top) * this.props.cells / this.props.pixels), this.props.cells - 1), 0);
   };
   
-  getTouch = event => {
+  updateTouch = (event, down) => {
     // We are making the bold assumptions that touch 0 is always first
     // if present, and when there are no touches a new touch will be touch 0.
-    const touch = event.changedTouches[0];
-    return touch.identifier == 0 ? touch : null;
+    pauseEvent(event);
+    let touch = event.changedTouches[0];
+    if (touch.identifier == 0) {
+      if (down != null) {
+        this.mouse.left = down;
+      }
+      this.updatePosition(touch);
+    }
   };
 }
 
 export class Save extends Component {
   render() {
     return <button onClick={() => {
-      window.location.href = document.getElementsByTagName('canvas')[0]
-        .toDataURL('image/png')
-        .replace('image/png', 'image/octet-stream');
+      const link = document.createElement('a');
+      link.href = this.props.canvas.current
+        .toDataURL('image/png');
+      link.download = 'liquid_go_image_' + new Date().toISOString().replaceAll(':', '_') + '.png';
+      link.click();
     }} >Screenshot</button>;
   }
+}
+
+export class Record extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { recording: false };
+  }
+  
+  componentDidMount() {
+    this.recorder = 
+    new MediaRecorder(this.props.canvas.current.captureStream(60), { mimeType: 'video/webm' });
+    this.chunks = [];
+    this.recorder.ondataavailable = event => this.chunks.push(event.data);
+    this.recorder.onstop = () => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob(this.chunks, { type : 'video/webm' }));
+      link.download = 'liquid_go_video_' + new Date().toISOString().replaceAll(':', '_') + '.webm';
+      link.click();
+      this.chunks = [];
+    };
+  }
+  
+  render() {
+    return !this.state.recording
+      ? <button onClick={() => {
+        this.recorder.start();
+        this.setState({ recording: true });
+      }} >Start recording</button>
+      : <button onClick={() => {
+        this.recorder.stop();
+        this.setState({ recording: false });
+      }} >Stop recording</button>;
+  }
+}
+
+function pauseEvent(e){
+  if(e.stopPropagation) e.stopPropagation();
+  if(e.preventDefault) e.preventDefault();
+  e.cancelBubble = true;
+  e.returnValue = false;
+  return false;
 }

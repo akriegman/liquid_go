@@ -6,32 +6,41 @@ import { io } from 'socket.io-client';
 const configuration = {
   'iceServers': [
     { 'urls': 'stun:stun.stunprotocol.org:3478' },
-    { 'urls': 'stun:stun01.sipphone.com' },
-    { 'urls': 'stun:stun.ekiga.net' },
-    { 'urls': 'stun:stun.fwdnet.net' },
-    { 'urls': 'stun:stun.ideasip.com' },
-    { 'urls': 'stun:stun.iptel.org' },
-    { 'urls': 'stun:stun.rixtelecom.se' },
-    { 'urls': 'stun:stun.schlund.de' },
-    { 'urls': 'stun:stun.l.google.com:19302' },
-    { 'urls': 'stun:stun1.l.google.com:19302' },
-    { 'urls': 'stun:stun2.l.google.com:19302' },
+    // { 'urls': 'stun:stun.stunprotocol.org:3478?transport=tcp' },
+    // { 'urls': 'stun:stun01.sipphone.com' },
+    // { 'urls': 'stun:stun.ekiga.net' },
+    // { 'urls': 'stun:stun.fwdnet.net' },
+    // { 'urls': 'stun:stun.ideasip.com' },
+    // { 'urls': 'stun:stun.iptel.org' },
+    // { 'urls': 'stun:stun.rixtelecom.se' },
+    // { 'urls': 'stun:stun.schlund.de' },
+    // { 'urls': 'stun:stun.l.google.com:19302' },
+    // { 'urls': 'stun:stun1.l.google.com:19302' },
+    // { 'urls': 'stun:stun2.l.google.com:19302' },
     { 'urls': 'stun:stun3.l.google.com:19302' },
-    { 'urls': 'stun:stun4.l.google.com:19302' },
-    { 'urls': 'stun:stunserver.org' },
-    { 'urls': 'stun:stun.softjoys.com' },
-    { 'urls': 'stun:stun.voiparound.com' },
-    { 'urls': 'stun:stun.voipbuster.com' },
-    { 'urls': 'stun:stun.voipstunt.com' },
-    { 'urls': 'stun:stun.voxgratia.org' },
-    { 'urls': 'stun:stun.xten.com' },
+    // { 'urls': 'stun:stun4.l.google.com:19302' },
+    // { 'urls': 'stun:stunserver.org' },
+    // { 'urls': 'stun:stun.softjoys.com' },
+    // { 'urls': 'stun:stun.voiparound.com' },
+    // { 'urls': 'stun:stun.voipbuster.com' },
+    // { 'urls': 'stun:stun.voipstunt.com' },
+    // { 'urls': 'stun:stun.voxgratia.org' },
+    // { 'urls': 'stun:stun.xten.com' },
   ]
 };
 
-export default { join };
+export default { join, cancel };
+
+let connections = [];
+
+function cancel() {
+  for (const socket of connections) socket.close();
+  connections = [];
+}
 
 function join(room) {
   const socket = io('https://ak2313.user.srcf.net/', { transports: ['polling'/*, 'websocket'*/] });
+  connections.push(socket);
 
   const pc = new RTCPeerConnection(configuration);
 
@@ -44,13 +53,13 @@ function join(room) {
   pc.addEventListener('icecandidate', event => {
     if (event.candidate) {
       socket.emit('icecandidate', event.candidate);
-      console.log(event.candidate);
+      console.log('Sending: ', event.candidate);
     }
   });
 
   // Listen for remote ICE candidates and add them to the local RTCPeerConnection
   socket.on('icecandidate', async candidate => {
-    console.log(candidate);
+    console.log('Receiving: ', candidate);
     try {
       await pc.addIceCandidate(candidate);
     } catch (e) {

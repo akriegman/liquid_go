@@ -38,6 +38,8 @@ module.exports = {
     'object-curly-spacing': ['error', 'always'],
     'space-infix-ops': 'error',
     'react/no-unescaped-entities': 'off',
+    'react/jsx-key': 'off',
+    'no-unused-vars': 'warn'
     // 'no-unused-vars': 'warn',
 
     /*

@@ -4,31 +4,41 @@ use rstar::RTree;
 use union_find::{QuickFindUf as UF, Union, UnionFind, UnionResult};
 use wasm_bindgen::prelude::*;
 
+use console::debug;
 use Team::*;
+mod score;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-// #[wasm_bindgen]
-// extern "C" {
-//   #[wasm_bindgen(js_namespace = console)]
-//   fn log(s: &str);
-//   #[wasm_bindgen(js_namespace = console)]
-//   fn time(s: &str);
-//   #[wasm_bindgen(js_namespace = console, js_name = timeEnd)]
-//   fn time_end(s: &str);
-// }
+// #[cfg(not)]
+mod console {
+  use super::wasm_bindgen;
 
-// macro_rules! log {
-//   ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
-// }
-// macro_rules! dbg {
-//   ($($t:tt)*) => (log(&format_args!("{:?}", $($t)*).to_string()))
-// }
+  #[wasm_bindgen]
+  extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = log)]
+    pub fn console_log(s: &str);
+    #[wasm_bindgen(js_namespace = console, js_name = time)]
+    pub fn time(s: &str);
+    #[wasm_bindgen(js_namespace = console, js_name = timeEnd)]
+    pub fn time_end(s: &str);
+  }
+
+  macro_rules! log {
+    ($($t:tt)*) => (crate::console::console_log(&format_args!($($t)*).to_string()))
+  }
+  macro_rules! debug {
+    ($($t:tt)*) => (crate::console::console_log(&format_args!("{:#?}", $($t)*).to_string()))
+  }
+
+  pub(crate) use debug;
+  pub(crate) use log;
+}
 
 // /// Just sets the console hook if in debug mode.
-// #[cfg(debug_assertions)]
+// // #[cfg(debug_assertions)]
 // #[wasm_bindgen(start)]
 // pub fn main() {
 //   console_error_panic_hook::set_once();
@@ -36,7 +46,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen]
 pub struct Board {
-  // OPTIONS AND INPUT -----------------------------------------------------
+  // OPTIONS, INPUT, AND STATE ---------------------------------------------
   b_pos: Option<[f32; 2]>,
   b_tail: Option<[f32; 2]>,
   w_pos: Option<[f32; 2]>,
@@ -45,6 +55,9 @@ pub struct Board {
   capturing: bool,
   /// Side length.
   size: usize,
+
+  b_prisoners: isize,
+  w_prisoners: isize,
 
   // INTERNALS -------------------------------------------------------------
 
@@ -60,8 +73,8 @@ pub struct Board {
   owner: Vec<usize>,
   /// The list of continuous bodies of liquid.
   bodies: UF<Body>,
-  #[cfg(feature = "show_liberties")]
-  debug_image: Vec<Team>,
+  /// An alternate screenbuffer. Used in debugging and showing territory.
+  alt_image: Vec<u32>,
 }
 
 struct TreeParams {}
@@ -87,6 +100,7 @@ struct Body {
   /// For use when reinserting liberties like above, so that we don't give liberties
   /// to a dead body.
   alive: bool,
+  team: Team,
 }
 
 /// These numbers are meant to be converted to little endian RGBA colors.
@@ -95,7 +109,7 @@ struct Body {
 enum Team {
   Black = 0x_ff_20_00_00,
   White = 0x_ff_e0_ff_ff,
-  Empty = 0x_ff_1e_8c_b4,
+  Empty = 0x_ff_48_9b_bb,
 }
 
 #[wasm_bindgen]
@@ -115,11 +129,12 @@ impl Board {
       w_tail: None,
       capturing,
       size,
+      b_prisoners: 0,
+      w_prisoners: 0,
       teams: vec![Empty; size * size],
       owner: vec![0; size * size],
       bodies: UF::new(1),
-      #[cfg(feature = "show_liberties")]
-      debug_image: vec![],
+      alt_image: vec![0; size * size],
     }
   }
 
@@ -128,10 +143,20 @@ impl Board {
   /// to return two values with wasm-bindgen, and either two functions or
   /// complicated pointer stuff to do it without.
   #[cfg(not(feature = "show_liberties"))]
-  pub fn get_image_slice(&self) -> Point {
-    Point {
-      x: self.teams.as_ptr() as isize,
-      y: self.teams.len() as isize * 4, // sizeof u32 / sizeof u8 = 4
+  pub fn get_image_slice(&self, buffer: u8) -> Point {
+    match buffer {
+      0 => Point {
+        x: self.teams.as_ptr() as isize,
+        y: self.teams.len() as isize * 4, // sizeof u32 / sizeof u8 = 4
+      },
+      1 => Point {
+        x: self.alt_image.as_ptr() as isize,
+        y: self.alt_image.len() as isize * 4, // sizeof u32 / sizeof u8 = 4
+      },
+      _ => {
+        debug!("buffer should be 0 for the main board or 1 for the alternate board. Treat it like an enum.");
+        panic!();
+      }
     }
   }
   /// This version does dome more expensive copying just so that it can color in
@@ -189,6 +214,11 @@ impl Board {
     &mut self.owner[idx]
   }
 
+  #[inline]
+  fn area(&self) -> usize {
+    self.size * self.size
+  }
+
   /// Pseudo code:
   /// ```
   /// for each player:
@@ -214,7 +244,7 @@ impl Board {
     w_active: bool,
     count: u32,
     black_first: bool,
-  ) {
+  ) -> Point {
     let b_pos: Option<Point> = if b_active { Some(*b_pos) } else { None };
     let w_pos: Option<Point> = if w_active { Some(*w_pos) } else { None };
     let mut b_key: Option<usize> = None;
@@ -228,7 +258,7 @@ impl Board {
       self.w_tail = self.w_pos;
     };
 
-    // Sumarry of the ugly spaghetti logic:
+    // Summary of the ugly spaghetti logic:
     // If mouse is not down or we are over enemy territory, p_pos = None and p_key =
     // 0. Otherwise set p_key to the existing body if over our own territory,
     // or a new body if over empty board. Do this for both players.
@@ -236,23 +266,22 @@ impl Board {
     for (pos, key_ref, team) in [(self.b_pos, &mut b_key, Black), (self.w_pos, &mut w_key, White)] {
       if let Some(pos) = pos.map(Point::from_f32) {
         match (self.get_teams(pos), team) {
-          (Black, White) | (White, Black) => (),
+          (Black, White) | (White, Black) => {
+            if let Some(&near) = self.bodies.get(self.get_owner(pos)).libs.nearest_neighbor(&pos) {
+              *key_ref = Some(self.bodies.insert(Body::new(vec![near], team)))
+            }
+          }
           (Black, Black) | (White, White) => {
             *key_ref = Some(self.get_owner(pos));
           }
-          (Empty, _) => {
-            *key_ref = Some(
-              self
-                .bodies
-                .insert(Body { libs: RTree::bulk_load_with_params(vec![pos]), ..Body::default() }),
-            )
-          }
+          (Empty, _) => *key_ref = Some(self.bodies.insert(Body::new(vec![pos], team))),
           (_, Empty) => unreachable!(),
         }
       }
     }
 
-    let vroom = 1. / count as f32;
+    // vroom = 2 (or vroom close to 2) causes problems, hence the max.
+    let vroom = 2. / count.max(2) as f32;
     for _ in (0..count).step_by(2) {
       for tup in
         [(&mut self.b_tail, &mut self.b_pos, b_pos), (&mut self.w_tail, &mut self.w_pos, w_pos)]
@@ -265,36 +294,48 @@ impl Board {
         }
       }
 
+      // for (pos, key) in [(self.b_pos, &mut b_key), (self.w_pos, &mut w_key)] {
+      //   if let (Some(pos), Some(key)) = (pos.map(Point::from_f32), key) {
+      //     if self.get_teams(pos) == Empty && (i / 2) % (count / 8) == (count / 16) {
+      //       *key = self
+      //         .bodies
+      //         .insert(Body { libs: RTree::bulk_load_with_params(vec![pos]), ..Body::default() })
+      //     }
+      //   }
+      // }
+
       // What I'm really trying to do here is irreducible control flow.
       let (f_pos, f_key, f_team, s_pos, s_key, s_team) = if black_first {
-        (self.b_pos, b_key, Black, self.w_pos, w_key, White)
+        (self.b_pos, &mut b_key, Black, self.w_pos, &mut w_key, White)
       } else {
-        (self.w_pos, w_key, White, self.b_pos, b_key, Black)
+        (self.w_pos, &mut w_key, White, self.b_pos, &mut b_key, Black)
       };
       let f_pos = f_pos.map(Point::from_f32);
       let s_pos = s_pos.map(Point::from_f32);
       // I could technically remove these if statements because the if statement in
       // assimilate will fail for the 0th Body. TODO check if this makes a
       // difference.
-      if let (Some(pos), Some(key)) = (f_pos, f_key) {
+      if let (Some(pos), Some(key)) = (f_pos, *f_key) {
         if self.assimilate(pos, key, f_team) {
-          break;
+          *f_key = None;
         }
       }
-      if let (Some(pos), Some(key)) = (s_pos, s_key) {
+      if let (Some(pos), Some(key)) = (s_pos, *s_key) {
         if self.assimilate(pos, key, s_team) {
-          break;
+          *s_key = None;
         }
         if self.assimilate(pos, key, s_team) {
-          break;
+          *s_key = None;
         }
       }
-      if let (Some(pos), Some(key)) = (f_pos, f_key) {
+      if let (Some(pos), Some(key)) = (f_pos, *f_key) {
         if self.assimilate(pos, key, f_team) {
-          break;
+          *f_key = None;
         }
       }
     }
+
+    Point::new(self.b_prisoners, self.w_prisoners)
   }
 
   /// Tell bodies[bod_key] to absorb it's nearest liberty. Returns true if there's no
@@ -341,11 +382,11 @@ impl Board {
           (_, Empty) => {
             self.bodies.get_mut(bod_key).insert(lib);
           }
-          (Empty, _) => panic!("You cannot assimilate back into the board."),
+          (Empty, _) => unreachable!("You cannot assimilate back into the board."),
         }
       }
 
-      // Check if oponent is captured first.
+      // Check if opponent is captured first.
       for neighbor in neighbors {
         self.check_dead(neighbor);
       }
@@ -364,16 +405,25 @@ impl Board {
       return false;
     }
     let bod = self.bodies.get_mut(bod_key);
-    if bod.libs.size() == 0 {
+    if bod.libs.size() == 0 && bod.alive {
       // We can't shrink our UnionFind, but we can still free up the memory of this now unused body.
       let corpse = std::mem::take(bod);
       bod.alive = false;
+
+      let mut prisoners = 0;
       self.teams.iter_mut().zip(self.owner.iter_mut()).for_each(|(t, o)| {
         if self.bodies.find(*o) == self.bodies.find(bod_key) {
           *t = Empty;
           *o = 0;
+          prisoners += 1;
         }
       });
+
+      match corpse.team {
+        Black => self.b_prisoners += prisoners,
+        White => self.w_prisoners += prisoners,
+        Empty => debug!("It should not be possible to capture a body of empty board."),
+      }
 
       for (lib, other_key) in corpse.stollen_libs {
         let other = self.bodies.get_mut(other_key);
@@ -389,6 +439,9 @@ impl Board {
 }
 
 impl Body {
+  fn new(libs: Vec<Point>, team: Team) -> Self {
+    Body { libs: RTree::bulk_load_with_params(libs), stollen_libs: vec![], alive: true, team }
+  }
   /// A wrapper around RTree::insert which checks for duplicates,
   /// effectively making an RTreeSet.
   #[inline]
@@ -424,7 +477,7 @@ impl Union for Body {
 
 impl Default for Body {
   fn default() -> Self {
-    Body { libs: RTree::new_with_params(), stollen_libs: vec![], alive: true }
+    Body::new(vec![], Empty)
   }
 }
 
@@ -440,9 +493,11 @@ impl Point {
     self.x = x;
     self.y = y;
   }
+
   fn as_f32(self) -> [f32; 2] {
     [self.x as f32, self.y as f32]
   }
+
   fn from_f32(arr: [f32; 2]) -> Point {
     Point { x: arr[0] as isize, y: arr[1] as isize }
   }

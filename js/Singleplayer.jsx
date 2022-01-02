@@ -1,6 +1,7 @@
 import React, { Component } from 'react';
 
-import Board, { Save } from './Board';
+import Board from './Board';
+import { format_score, Radio, Option } from './utils';
 
 export default class Singleplayer extends Component {
   constructor(props) {
@@ -13,6 +14,8 @@ export default class Singleplayer extends Component {
       pixels: 600,
       capturing: true,
       flow: 300,
+      scoreType: 'china',
+      score: null,
     };
   }
 
@@ -38,93 +41,73 @@ export default class Singleplayer extends Component {
   componentWillUnmount() {
     clearInterval(this.intervalID);
   }
+  
+  componentDidUpdate(_, prevState) {
+    if (prevState.cells != this.state.cells) {
+      this.setState({ flow: Math.ceil(this.area() / 4800) });
+    }
+  }
 
   render() {
     this.blackSample = this.sampleFunc(true, this.state.blackStrat);
     this.whiteSample = this.sampleFunc(false, this.state.whiteStrat);
     
-    return <div style={{ display: 'flex', 'align-items': 'flex-start' }}>
-      <div style={{ flex: '0 0', 'white-space': 'nowrap', display: 'block' }}>
-        <fieldset
-          onChange={() =>
-            this.setState({
-              blackStrat: document.querySelector(
-                'input[name="blackStrat"]:checked'
-              ).value,
-            })
-          }
-        >
-          <legend>Strategy for Black:</legend>
-          <label>
-            <input type="radio" name="blackStrat" value="mouse left" defaultChecked />
-              Left click
-          </label>
-          <div>
-            <label>
-              <input type="radio" name="blackStrat" value="mouse right" />
-              Right click
-            </label>
-          </div>
-          <div>
-            <label>
-              <input type="radio" name="blackStrat" value="sine" />
-              Lattice
-            </label>
-          </div>
-        </fieldset>
-        <fieldset
-          onChange={() =>
-            this.setState({
-              whiteStrat: document.querySelector(
-                'input[name="whiteStrat"]:checked'
-              ).value,
-            })
-          }
-        >
-          <legend>Strategy for White:</legend>
-          <label>
-            <input type="radio" name="whiteStrat" value="mouse left" />
-              Left click
-          </label>
-          <div>
-            <label>
-              <input type="radio" name="whiteStrat" value="mouse right" defaultChecked />
-              Right click
-            </label>
-          </div>
-          <div>
-            <label>
-              <input type="radio" name="whiteStrat" value="sine" />
-              Lattice
-            </label>
-          </div>
-        </fieldset>
-        <br/><label>
+    return <Board ref={this.board} cells={this.state.cells} pixels={this.state.pixels} flow={this.state.flow} capturing={this.state.capturing}>
+      <Radio value={this.state.blackStrat} on={value => this.setState({ blackStrat: value })}>
+        <legend>Behavior for Black:</legend>
+        <Option value='mouse left'>Left click</Option>
+        <Option value='mouse right'>Right click</Option>
+        <Option value='sine'>Lattice</Option>
+      </Radio>
+      <br/>
+      <Radio value={this.state.whiteStrat} on={value => this.setState({ whiteStrat: value })}>
+        <legend>Behavior for White:</legend>
+        <Option value='mouse left'>Left click</Option>
+        <Option value='mouse right'>Right click</Option>
+        <Option value='sine'>Lattice</Option>
+      </Radio>
+      <br/><label>
           Width in pixels:
-          <br/><input type='number' value={this.state.pixels}
-            onInput={event => this.setState({ pixels: event.target.value })}></input>
-        </label>
-        <br/><label>
+        <br/><input type='number' value={this.state.pixels}
+          onInput={event => this.setState({ pixels: Number(event.target.value) })}></input>
+      </label>
+      <br className='big'/>
+      <label>
           Width in cells:
-          <br/><input type='number' value={this.state.cells}
-            onInput={event => this.setState({ cells: event.target.value })}></input>
-        </label>
-        <br/><label>
-          <input type='checkbox' checked={this.state.capturing}
-            onInput={() => this.setState({ capturing: !this.state.capturing })}></input>
+        <br/><input type='number' value={this.state.cells}
+          onInput={event => { if (event.target.value > 0) { this.setState({ cells: Number(event.target.value) }); } }} ></input>
+      </label>
+      <br className='big'/>
+      <label>
+        <input type='checkbox' defaultChecked={this.state.capturing}
+          onInput={() => this.setState({ capturing: !this.state.capturing })}></input>
             &nbsp;Enable capturing
-        </label>
-        <br/><label>
+      </label>
+      <br className='big'/>
+      <label>
           Flow: {this.state.flow} cells per frame
-          <br/>
-          <input type='range' value={this.state.flow} min={Math.floor(this.state.cells / 12)} max={this.state.cells}
-            onInput={event => this.setState({ flow: event.target.value })}></input>
-        </label>
-        <br/><Save/>
-      </div>
-      
-      <Board ref={this.board} cells={this.state.cells} pixels={this.state.pixels} flow={this.state.flow} capturing={this.state.capturing}/>
-    </div>;
+        <br/>
+        <input type='range' value={this.state.flow} min={Math.floor(this.area() / 14400)} max={Math.floor(this.area() / 1200)}
+          onInput={event => this.setState({ flow: Number(event.target.value) })}></input>
+      </label>
+      <br className='big'/>
+      <Radio value={this.state.scoreType} on={value => this.setState({ scoreType: value })}>
+        <legend>Scoring method:</legend>
+        <Option value='stone'>Stone</Option>
+        <Option value='china'>Chinese</Option>
+        <Option value='japan'>Japanese</Option>
+      </Radio>
+      <br/><button onClick={() => {
+        this.setState({ score: this.board.current.score(this.state.scoreType) });
+      }}>Calculate score</button>
+      <br/>{this.state.score == null ? '' : 'Black: ' + format_score(this.state.score.black)}
+      <br/>{this.state.score == null ? '' : 'White: ' + format_score(this.state.score.white)}
+      <br/><button onClick={() => {
+        this.board.current.componentWillUnmount();
+        this.board.current.componentDidMount();
+      }}>Clear board</button>
+      <br/>{this.props.children}
+    </Board> ;
   }
 
   sampleFunc = (isBlack, strat) => strat === 'mouse left'
@@ -146,4 +129,6 @@ export default class Singleplayer extends Component {
           active: true,
         })
         : () => ({ x: 0, y: 0, active: false });
+        
+  area = () => this.state.cells * this.state.cells;
 }

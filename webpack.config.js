@@ -2,11 +2,12 @@
 const path = require('path');
 const CopyPlugin = require('copy-webpack-plugin');
 const WasmPackPlugin = require('@wasm-tool/wasm-pack-plugin');
+// const BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
 
 const dist = path.resolve(__dirname, 'dist');
 
 module.exports = {
-  mode: 'production',
+  mode: 'development',
   devtool: 'eval-source-map',
   experiments: {
     asyncWebAssembly: true,
@@ -33,11 +34,11 @@ module.exports = {
   },
   resolve: { extensions: ['*', '.js', '.jsx'] },
   plugins: [
+    // new BundleAnalyzerPlugin(),
     new CopyPlugin({ patterns: [path.resolve(__dirname, 'static')] }),
-
     new WasmPackPlugin({
       crateDirectory: __dirname,
-      extraArgs: '-- -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort',
+      // extraArgs: '-- -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort',
     }),
   ],
 };

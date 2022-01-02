@@ -8,19 +8,32 @@ export default class Multiplayer extends Component {
   constructor(props) {
     super(props);
     this.board = React.createRef();
+    this.state = {
+      thatName: 'Stranger',
+      score: undefined,
+    };
   }
+  
+  static defaultProps = {
+    thisName: 'Stranger',
+  };
 
   componentDidMount() {
     rtc.join(this.props.room).then(({ isBlack, dc }) => {
       let theseSamples = [];
       let thoseSamples = [];
       this.dc = dc;
+      this.setState({ isBlack });
 
-      dc.addEventListener('close', () => console.log('Closing data channel'));
+      dc.addEventListener('close', () => this.componentWillUnmount());
 
       dc.addEventListener('open', () => {
+        dc.send(JSON.stringify({ name: this.props.thisName }));
+        
         this.intervalID = setInterval(() => {
-          if (theseSamples.length < 60) {
+          // the Math.random() is so that if one player gets a lead
+          // it will decay back down.
+          if (theseSamples.length < 10 * Math.random() + 1) {
             const sample = {
               x: this.board.current.mouse.x,
               y: this.board.current.mouse.y,
@@ -33,28 +46,49 @@ export default class Multiplayer extends Component {
           }
 
           while (theseSamples.length > 0 && thoseSamples.length > 0) {
-            isBlack ?
-              this.board.current.spill(theseSamples[0], thoseSamples[0]) :
-              this.board.current.spill(thoseSamples[0], theseSamples[0]);
+            const thisSample = theseSamples.shift();
+            const thatSample = thoseSamples.shift();
+            this.setState({ prisoners: isBlack
+              ? this.board.current.spill(thisSample, thatSample)
+              : this.board.current.spill(thatSample, thisSample)
+            });
             
-            theseSamples.shift();
-            thoseSamples.shift();
+            this.timeout++;
+            if (thisSample.active || thatSample.active) {
+              this.started = true;
+              this.timeout = 0;
+            } else {
+              if (this.timeout == 60 && this.started) this.board.current.score();
+            }
+              
           }
         }, 17);
       });
 
       dc.addEventListener('message', event => {
-        thoseSamples.push(JSON.parse(event.data));
+        const message = JSON.parse(event.data);
+        if (message.name != undefined) {
+          this.setState({ thatName: message.name });
+        } else {
+          thoseSamples.push(message);
+        }
       });
     });
   }
 
   componentWillUnmount() {
-    this.dc.close();
+    this.dc?.close();
     clearInterval(this.intervalID);
+    rtc.cancel();
   }
 
   render() {
-    return <Board ref={this.board} />;
+    return <Board ref={this.board}>
+      {this.state.isBlack == undefined
+        ? <p>Searching for opponent...</p>
+        : <><p>Black:<br/>{this.state.isBlack ? this.props.thisName : this.state.thatName}</p>
+          <br/><p>White:<br/>{!this.state.isBlack ? this.props.thisName : this.state.thatName}</p></>}
+      <br/>{this.props.children}
+    </Board>;
   }
 }

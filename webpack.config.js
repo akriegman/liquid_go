@@ -7,8 +7,8 @@ const WasmPackPlugin = require('@wasm-tool/wasm-pack-plugin');
 const dist = path.resolve(__dirname, 'dist');
 
 module.exports = {
-  mode: 'development',
-  devtool: 'eval-source-map',
+  // mode: 'development',
+  // devtool: 'eval-source-map',
   experiments: {
     asyncWebAssembly: true,
   },
@@ -38,7 +38,7 @@ module.exports = {
     new CopyPlugin({ patterns: [path.resolve(__dirname, 'static')] }),
     new WasmPackPlugin({
       crateDirectory: __dirname,
-      // extraArgs: '-- -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort',
+      extraArgs: '-- -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort',
     }),
   ],
 };

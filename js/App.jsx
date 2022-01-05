@@ -2,7 +2,7 @@ import React, { Component } from 'react';
 
 import Multiplayer from './Multiplayer';
 import Singleplayer from './Singleplayer';
-import { Radio, Option } from './utils';
+import { Radio, Option, mobileOrTablet } from './utils';
 
 export default class App extends Component {
   constructor(props) {
@@ -10,18 +10,17 @@ export default class App extends Component {
     this.state = {
       mode: 'lobby',
       scoring: 'china',
+      flow: 'Normal',
+      resolution: mobileOrTablet() ? 'Blocky' : 'Smooth',
+      name: '',
+      room: '',
     };
-    this.room = React.createRef();
-    this.name = React.createRef();
   }
   
   render() {
     switch(this.state.mode) {
     case 'lobby': 
       return <>
-        <p>
-        Press "Find opponent" to play a stranger, or start a private match by first entering a passphrase and having you opponent enter the same phrase.
-        </p>
         <div style={{ display: 'flex', flexDirection: 'column', margin: '0 auto' }}>
           <div className='accent' style={{ display: 'flex', flexDirection: 'column', padding: '8px' }}>
             <button onClick={() => this.setState({ mode: 'singleplayer' }) } >
@@ -30,13 +29,27 @@ export default class App extends Component {
           </div>
           <br className='big'/>
           <div className='accent' style={{ display: 'flex', flexDirection: 'column', padding: '8px' }}>
-            <input ref={this.name} placeholder='Display name'/>
-            <br/><input ref={this.room} placeholder='Passphrase' />
+            <input value={this.state.name} onChange={event => this.setState({ name: event.target.value })} placeholder='Display name'/>
+            <br/><input value={this.state.room} onChange={event => this.setState({ room: event.target.value })} placeholder='Passphrase' />
+            <p>
+        Leave the passphrase blank to play a stranger.
+            </p>
             <br className='big'/><Radio value={this.state.scoring} on={value => this.setState({ scoring: value })}>
-              <legend>Scoring method</legend>
+              <legend>Scoring method:</legend>
               <Option value='stone'>Stone</Option>
               <Option value='china'>Chinese</Option>
               <Option value='japan'>Japanese</Option>
+            </Radio>
+            <br className='big'/><Radio value={this.state.flow} on={value => this.setState({ flow: value })}>
+              <legend>Game speed:</legend>
+              <Option value={'Slow'}>Slow</Option>
+              <Option value={'Normal'}>Normal</Option>
+              <Option value={'Fast'}>Fast</Option>
+            </Radio>
+            <br className='big'/><Radio value={this.state.resolution} on={value => this.setState({ resolution: value })}>
+              <legend>Resolution:</legend>
+              <Option value={'Blocky'}>Blocky</Option>
+              <Option value={'Smooth'}>Smooth</Option>
             </Radio>
             <br/><button onClick={() => this.setState({ mode: 'multiplayer' }) }>
             Find opponent
@@ -48,28 +61,41 @@ export default class App extends Component {
         the same, except instead of taking turns placing individual stones, you pour the stones out like
         a liquid in real time.</p>
         <p>
-          If you are unfamiliar with Go, here is a brief statement of the rules from <a href='https://en.wikipedia.org/wiki/Rules_of_Go#Concise_statement'>Wikipedia
-          </a> (in turn quoted from elsewhere, and simplified a bit by me):
+          You can find the rules of Go on
+          &nbsp;<a href='https://en.wikipedia.org/wiki/Rules_of_Go#Concise_statement'>Wikipedia</a>,
+          but you don't need to know them. Here are the rules for Liquid Go:
         </p>
         <blockquote>
-          <ol>
+          <h4 style={{ marginTop: '0' }}>Rules of play:</h4>
+          <ul>
             <li>The board is empty at the onset of the game.</li>
-            <li>Black makes the first move, after which White and Black alternate.</li>
-            <li>A move consists of placing one stone of one's own color on an empty space on the board.</li>
-            <li>A player may pass their turn at any time.</li>
-            <li>A stone or solidly connected group of stones of one color is captured and removed from the board when all the intersections directly adjacent to it are occupied by the enemy. (Capture of the enemy takes precedence over self capture.)</li>
-            <li>Two consecutive passes end the game.</li>
-            <li>A player's area consists of all the points the player has either occupied or surrounded.</li>
-            <li>The player with more area wins.</li>
-          </ol>
+            <li>Once the game begins, you can hold the mouse button to pour liquid of your color out from the cursor, or release the mouse button to pass.</li>
+            <li>You can pour into empty board space, but once poured the liquid cannot move or be overwritten.</li>
+            <li>A connected body of liquid of one color is captured and removed from the board when all of it's boundaries either touch the edge of the board or the enemy's liquid. (Capture of the enemy takes precedence over self capture.)</li>
+          </ul>
+          <h4>End of the game:</h4>
+          <ul>
+            <li>If a continuous region of empty board only touches liquid of one color, then it is the territory of that player.</li>
+            <li>A player's score is calculated with one of the following methods:
+              <ul>
+                <li>Stone: your score is the area of your liquid on the board.</li>
+                <li>Chinese: your score is the area of your liquid and your territory.</li>
+                <li>Japanese: your score is the area of your territory minus the area of your captured bodies.</li>
+              </ul>
+            </li>
+            <li>When both players pass for one second, the score will be calculated and each player's territories highlighted.</li>
+            <li>If both players pass for three more seconds then the game will end.</li>
+          </ul>
         </blockquote>
-        <p>
-          In Liquid Go, your stones are instead a continuous body of liquid, and you hold the mouse button to pour.
-          The rules are otherwise very similar.
-        </p>
       </>;
     case 'multiplayer':
-      return <Multiplayer room={this.room.current.value} thisName={this.name.current.value || 'Stranger'}>
+      return <Multiplayer
+        scoring={this.state.scoring}
+        flow={this.state.flow}
+        resolution={this.state.resolution}
+        room={this.state.room + '?scoring=' + this.state.scoring + '?flow=' + this.state.flow + '?resolution=' + this.state.resolution}
+        thisName={this.state.name || 'Stranger'}
+      >
         <button onClick={() => this.setState({ mode: 'lobby' }) }>
           Back to lobby
         </button>

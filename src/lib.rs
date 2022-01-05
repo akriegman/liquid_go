@@ -281,7 +281,7 @@ impl Board {
     }
 
     // vroom = 2 (or vroom close to 2) causes problems, hence the max.
-    let vroom = 2. / count.max(2) as f32;
+    let vroom = 0.5 / count.max(2) as f32;
     for _ in (0..count).step_by(2) {
       for tup in
         [(&mut self.b_tail, &mut self.b_pos, b_pos), (&mut self.w_tail, &mut self.w_pos, w_pos)]
@@ -420,8 +420,8 @@ impl Board {
       });
 
       match corpse.team {
-        Black => self.b_prisoners += prisoners,
-        White => self.w_prisoners += prisoners,
+        Black => self.w_prisoners += prisoners,
+        White => self.b_prisoners += prisoners,
         Empty => debug!("It should not be possible to capture a body of empty board."),
       }
 

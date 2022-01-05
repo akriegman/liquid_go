@@ -49,11 +49,6 @@
       margin-top: 6px;
     }
 
-    blockquote {
-      padding: 15px;
-      position: relative;
-    }
-
     fieldset {
       padding-inline-start: 0;
       padding-inline-end: 0;
@@ -91,6 +86,11 @@
       background: rgb(255, 237, 203);
     }
 
+    blockquote {
+      padding: 15px;
+      position: relative;
+    }
+
     /* blockquote::before {
       content: '\201C';
       font-size: 30px;
@@ -114,8 +114,12 @@
     <div class='footer'>
       <a href="https://www.srcf.net/" style='display: flex;'><img src="https://www.srcf.net/images/poweredby-dark.svg"
           alt="Powered by the Student-Run Computing Facility (SRCF)"></a>
-      <div style='margin-left: auto;'>
-        Made by Aaron Kriegman &lt;aaronkplus2@gmail.com&gt;
+      <div style='margin-left: auto; display: flex; flex-direction: column; align-items: center;'>
+        Made by Aaron Kriegman
+        <div>
+          &lt;<a id='email'>aaronkplus2@gmail.com</a>&gt;
+        </div>
+        <div id='secret'></div>
       </div>
     </div>
   </div>

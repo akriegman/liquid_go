@@ -17,7 +17,7 @@ const configuration = {
     // { 'urls': 'stun:stun.l.google.com:19302' },
     // { 'urls': 'stun:stun1.l.google.com:19302' },
     // { 'urls': 'stun:stun2.l.google.com:19302' },
-    { 'urls': 'stun:stun3.l.google.com:19302' },
+    // { 'urls': 'stun:stun3.l.google.com:19302' },
     // { 'urls': 'stun:stun4.l.google.com:19302' },
     // { 'urls': 'stun:stunserver.org' },
     // { 'urls': 'stun:stun.softjoys.com' },
@@ -26,6 +26,11 @@ const configuration = {
     // { 'urls': 'stun:stun.voipstunt.com' },
     // { 'urls': 'stun:stun.voxgratia.org' },
     // { 'urls': 'stun:stun.xten.com' },
+    {
+      urls: 'turn:numb.viagenie.ca',
+      credential: 'muazkh',
+      username: 'webrtc@live.com'
+    },
   ]
 };
 
@@ -92,6 +97,7 @@ function join(room) {
             .catch(console.error);
         });
         const offer = await pc.createOffer();
+        console.log(offer);
         await pc.setLocalDescription(offer)
           .catch(console.error);
         socket.emit('offer', offer);
@@ -106,6 +112,7 @@ function join(room) {
           pc.setRemoteDescription(new RTCSessionDescription(offer))
             .catch(console.error);
           const answer = await pc.createAnswer();
+          console.log(answer);
           await pc.setLocalDescription(answer)
             .catch(console.error);
           socket.emit('answer', answer);

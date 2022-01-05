@@ -1,7 +1,7 @@
 import React, { Component } from 'react';
 
 import Board from './Board';
-import { format_score, Radio, Option } from './utils';
+import { formatScore, Radio, Option, mobileOrTablet } from './utils';
 
 export default class Singleplayer extends Component {
   constructor(props) {
@@ -10,12 +10,13 @@ export default class Singleplayer extends Component {
     this.state = {
       blackStrat: 'mouse left',
       whiteStrat: 'mouse right',
-      cells: 1200,
+      cells: mobileOrTablet() ? 200 : 1200,
       pixels: 600,
       capturing: true,
       flow: 300,
       scoreType: 'china',
       score: null,
+      prisoners: { black: 0, white: 0 }
     };
   }
 
@@ -23,10 +24,10 @@ export default class Singleplayer extends Component {
     let then = performance.now();
     let frames = 0;
     this.intervalID = setInterval(() => {
-      this.board.current.spill(
+      this.setState({ prisoners: this.board.current.spill(
         this.blackSample(),
         this.whiteSample(),
-      );
+      ) });
       
       let now = performance.now();
       frames += 1;
@@ -35,7 +36,7 @@ export default class Singleplayer extends Component {
         then = now;
         frames = 0;
       }
-    }, 16);
+    }, 17);
   }
   
   componentWillUnmount() {
@@ -52,7 +53,7 @@ export default class Singleplayer extends Component {
     this.blackSample = this.sampleFunc(true, this.state.blackStrat);
     this.whiteSample = this.sampleFunc(false, this.state.whiteStrat);
     
-    return <Board ref={this.board} cells={this.state.cells} pixels={this.state.pixels} flow={this.state.flow} capturing={this.state.capturing}>
+    return <Board ref={this.board} cells={this.state.cells <= 0 ? 1 : Number(this.state.cells)} pixels={Number(this.state.pixels)} flow={this.state.flow} capturing={this.state.capturing}>
       <Radio value={this.state.blackStrat} on={value => this.setState({ blackStrat: value })}>
         <legend>Behavior for Black:</legend>
         <Option value='mouse left'>Left click</Option>
@@ -69,13 +70,13 @@ export default class Singleplayer extends Component {
       <br/><label>
           Width in pixels:
         <br/><input type='number' value={this.state.pixels}
-          onInput={event => this.setState({ pixels: Number(event.target.value) })}></input>
+          onInput={event => this.setState({ pixels: event.target.value })}></input>
       </label>
       <br className='big'/>
       <label>
           Width in cells:
         <br/><input type='number' value={this.state.cells}
-          onInput={event => { if (event.target.value > 0) { this.setState({ cells: Number(event.target.value) }); } }} ></input>
+          onInput={event => this.setState({ cells: event.target.value })} ></input>
       </label>
       <br className='big'/>
       <label>
@@ -100,8 +101,18 @@ export default class Singleplayer extends Component {
       <br/><button onClick={() => {
         this.setState({ score: this.board.current.score(this.state.scoreType) });
       }}>Calculate score</button>
-      <br/>{this.state.score == null ? '' : 'Black: ' + format_score(this.state.score.black)}
-      <br/>{this.state.score == null ? '' : 'White: ' + format_score(this.state.score.white)}
+      <br/>
+      Black:
+      <div style={{ marginLeft: '1em' }}>
+        {formatScore(this.state.prisoners.black)} prisoners taken
+        <br/>{this.state.score == null ? '' : formatScore(this.state.score.black) + ' points'}
+      </div>
+      <br className='big'/>
+      White:
+      <div style={{ marginLeft: '1em' }}>
+        {formatScore(this.state.prisoners.white)} prisoners taken
+        <br/>{this.state.score == null ? '' : formatScore(this.state.score.white) + ' points'}
+      </div>
       <br/><button onClick={() => {
         this.board.current.componentWillUnmount();
         this.board.current.componentDidMount();

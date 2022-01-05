@@ -88,8 +88,8 @@ impl Board {
       w_stone: w_stones,
       b_china: b_stones + b_territory,
       w_china: w_stones + w_territory,
-      b_japan: b_territory - self.b_prisoners,
-      w_japan: w_territory - self.w_prisoners,
+      b_japan: b_territory - self.w_prisoners,
+      w_japan: w_territory - self.b_prisoners,
     }
   }
 }

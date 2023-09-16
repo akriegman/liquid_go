@@ -5,41 +5,41 @@ module.exports = {
     es2021: true,
   },
   extends: [
-    'eslint:recommended',
-    'plugin:react/recommended',
+    "eslint:recommended",
+    "plugin:react/recommended",
   ],
   parserOptions: {
     ecmaFeatures: {
       jsx: true,
     },
     ecmaVersion: 13,
-    sourceType: 'module',
+    sourceType: "module",
   },
-  plugins: ['react'],
+  plugins: ["react"],
   rules: {
     indent: [
-      'error',
+      "error",
       2,
     ],
-    'linebreak-style': [
-      'error',
-      'unix',
+    "linebreak-style": [
+      "error",
+      "unix",
     ],
     quotes: [
-      'error',
-      'single',
+      "error",
+      "single",
     ],
     semi: [
-      'error',
-      'always',
+      "error",
+      "always",
     ],
-    'arrow-parens': ['error', 'as-needed'],
-    'react/prop-types': 'off',
-    'object-curly-spacing': ['error', 'always'],
-    'space-infix-ops': 'error',
-    'react/no-unescaped-entities': 'off',
-    'react/jsx-key': 'off',
-    'no-unused-vars': 'warn'
+    "arrow-parens": ["error", "as-needed"],
+    "react/prop-types": "off",
+    "object-curly-spacing": ["error", "always"],
+    "space-infix-ops": "error",
+    "react/no-unescaped-entities": "off",
+    "react/jsx-key": "off",
+    "no-unused-vars": "warn",
     // 'no-unused-vars': 'warn',
 
     /*

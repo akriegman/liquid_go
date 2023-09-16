@@ -6,7 +6,8 @@
     "build": "rimraf dist pkg && webpack",
     "start": "rimraf dist pkg && webpack-dev-server ",
     "dist": "npm run build && wasm-opt dist/*.wasm -o dist/*.wasm --strip-debug --dce -O3 && scp dist/* ak2313@shell.srcf.net:~/public_html/liquid_go",
-    "dist-server": "scp `find server -name node_modules -prune -o -type f -print` ak2313@shell.srcf.net:~/src/liquid_go/server"
+    "dist-server": "scp `find server -name node_modules -prune -o -type f -print` ak2313@shell.srcf.net:~/src/liquid_go/server",
+    "fmt": "deno fmt js server && cargo fmt"
   },
   "devDependencies": {
     "@babel/core": "^7.16.5",

@@ -49,8 +49,10 @@ pub struct Board {
   // OPTIONS, INPUT, AND STATE ---------------------------------------------
   b_pos: Option<[f32; 2]>,
   b_tail: Option<[f32; 2]>,
+  b_speed: f32,
   w_pos: Option<[f32; 2]>,
   w_tail: Option<[f32; 2]>,
+  w_speed: f32,
 
   capturing: bool,
   /// Side length.
@@ -125,8 +127,10 @@ impl Board {
     Self {
       b_pos: None,
       b_tail: None,
+      b_speed: 1.,
       w_pos: None,
       w_tail: None,
+      w_speed: 1.,
       capturing,
       size,
       b_prisoners: 0,
@@ -185,6 +189,14 @@ impl Board {
 
   pub fn set_capturing(&mut self, capturing: bool) {
     self.capturing = capturing;
+  }
+
+  pub fn set_speed(&mut self, black: bool, speed: f32) {
+    if black {
+      self.b_speed = speed;
+    } else {
+      self.w_speed = speed;
+    }
   }
 
   #[inline]
@@ -281,12 +293,14 @@ impl Board {
     }
 
     // vroom = 2 (or vroom close to 2) causes problems, hence the max.
-    let vroom = 0.5 / count.max(2) as f32;
+    let b_vroom = self.b_speed / count.max(2) as f32;
+    let w_vroom = self.w_speed / count.max(2) as f32;
     for _ in (0..count).step_by(2) {
-      for tup in
-        [(&mut self.b_tail, &mut self.b_pos, b_pos), (&mut self.w_tail, &mut self.w_pos, w_pos)]
-      {
-        if let (Some(self_tail), Some(self_pos), Some(pos)) = tup {
+      for tup in [
+        (&mut self.b_tail, &mut self.b_pos, b_pos, b_vroom),
+        (&mut self.w_tail, &mut self.w_pos, w_pos, w_vroom),
+      ] {
+        if let (Some(self_tail), Some(self_pos), Some(pos), vroom) = tup {
           self_tail[0] += (pos.x as f32 - self_tail[0]) * vroom;
           self_tail[1] += (pos.y as f32 - self_tail[1]) * vroom;
           self_pos[0] += (self_tail[0] - self_pos[0]) * vroom;

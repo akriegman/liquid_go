@@ -1,3 +1,9 @@
+# Liquid Go
+
+A game based on the board game Go. Play it at [liquidgo.xyz](https://liquidgo.xyz).
+
+Below is the README from the WASM project template I used.
+
 ## How to install
 
 ```sh
